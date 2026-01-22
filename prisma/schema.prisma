@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model DailyCycle {
+  id            String   @id @default(uuid())
+  date          String   @unique // YYYY-MM-DD
+  symbol        String
+  technicalData Json     // RSI, SMA20, SMA50, MACD, volume, avgVolume, close
+  status        String   // pending | completed | failed
+  createdAt     DateTime @default(now())
+
+  evaluations AgentEvaluation[]
+  decision    AggregatedDecision?
+  trade       Trade?
+}
+
+model AgentEvaluation {
+  id            String   @id @default(uuid())
+  cycleId       String
+  agentName     String   // momentum | meanReversion | confirmation
+  promptVersion String
+  bullishScore  Float    // -1 to +1
+  confidence    Float    // 0 to 1
+  rationale     String[] // Array of reason strings
+  rawResponse   String   // Full LLM response for debugging
+  createdAt     DateTime @default(now())
+
+  cycle DailyCycle @relation(fields: [cycleId], references: [id])
+
+  @@index([cycleId])
+}
+
+model AggregatedDecision {
+  id            String   @id @default(uuid())
+  cycleId       String   @unique
+  weightedScore Float
+  decision      String   // BUY | SELL | HOLD
+  riskBlocked   Boolean  @default(false)
+  riskReason    String?
+  createdAt     DateTime @default(now())
+
+  cycle DailyCycle @relation(fields: [cycleId], references: [id])
+}
+
+model Trade {
+  id            String    @id @default(uuid())
+  cycleId       String    @unique
+  alpacaOrderId String
+  side          String    // buy | sell
+  symbol        String
+  quantity      Float
+  filledPrice   Float?
+  status        String    // pending | filled | failed
+  createdAt     DateTime  @default(now())
+  filledAt      DateTime?
+
+  cycle DailyCycle @relation(fields: [cycleId], references: [id])
+}
+
+model SandboxState {
+  id               String   @id @default(uuid())
+  date             String   @unique
+  allocatedCapital Float    // Fixed sandbox allocation (e.g., 200)
+  currentEquity    Float    // Current value of sandbox
+  peakEquity       Float    // Highest equity ever reached (for drawdown calc)
+  cashBalance      Float
+  positionQty      Float    @default(0)
+  positionSymbol   String?
+  positionAvgPrice Float?
+  drawdownPct      Float    @default(0) // Calculated: (peakEquity - currentEquity) / peakEquity
+  createdAt        DateTime @default(now())
+
+  @@index([date])
+}
+
+model PromptVersion {
+  id        String   @id @default(uuid())
+  agentName String
+  version   String
+  template  String
+  createdAt DateTime @default(now())
+
+  @@unique([agentName, version])
+}
