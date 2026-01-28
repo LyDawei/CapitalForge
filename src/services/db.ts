@@ -1,4 +1,6 @@
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
 import {
   TechnicalData,
   AgentEvaluationInput,
@@ -12,7 +14,12 @@ let prismaInstance: PrismaClient | null = null;
 
 export function getPrismaClient(): PrismaClient {
   if (!prismaInstance) {
-    prismaInstance = new PrismaClient();
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error('DATABASE_URL environment variable is not set');
+    }
+    const adapter = new PrismaPg({connectionString});
+    prismaInstance = new PrismaClient({ adapter });
   }
   return prismaInstance;
 }
@@ -44,9 +51,25 @@ export async function createDailyCycle(
   return cycle.id;
 }
 
-export async function getDailyCycleByDate(date: string) {
+export async function getDailyCycleByDate(date: string, symbol?: string) {
   const prisma = getPrismaClient();
-  return prisma.dailyCycle.findUnique({
+  if (symbol) {
+    // Use findFirst with compound where clause until Prisma client is regenerated
+    // After migration, this can be changed to findUnique with date_symbol: { date, symbol }
+    return prisma.dailyCycle.findFirst({
+      where: { 
+        date,
+        symbol,
+      },
+      include: {
+        evaluations: true,
+        decision: true,
+        trade: true,
+      },
+    });
+  }
+  // Legacy: if no symbol provided, find first cycle for that date (for backward compatibility)
+  return prisma.dailyCycle.findFirst({
     where: { date },
     include: {
       evaluations: true,
@@ -207,3 +230,4 @@ export async function getPromptVersion(agentName: string, version: string) {
     },
   });
 }
+

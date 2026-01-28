@@ -15,6 +15,11 @@ export interface RiskConfig {
 /**
  * Pure function to check risk rules
  * Returns whether the decision is allowed and calculates quantity if applicable
+ * 
+ * Note: With multi-symbol support, this enforces a shared portfolio constraint:
+ * - Only one position can be open at a time across all symbols
+ * - If a position exists in any symbol, BUY orders for other symbols are blocked
+ * - SELL orders only work if the current position matches the symbol being evaluated
  */
 export function checkRisk(
   decision: Decision,
@@ -22,9 +27,10 @@ export function checkRisk(
   currentPrice: number,
   config: RiskConfig
 ): RiskResult {
-  // Rule 1: Max 1 position - block BUY if position exists
+  // Rule 1: Max 1 position - block BUY if position exists (shared portfolio constraint)
+  // With multi-symbol support, this ensures only one position across all symbols
   if (decision === 'BUY' && sandbox.positionQty > 0) {
-    return { allowed: false, reason: 'Position already open' };
+    return { allowed: false, reason: `Position already open (${sandbox.positionSymbol || 'unknown'})` };
   }
 
   // Rule 2: Must have position to SELL

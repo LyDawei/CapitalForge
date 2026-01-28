@@ -6,6 +6,8 @@ import { createLLMService, LLMService } from './services/llm';
 import { createMockLLMService } from './services/llm.mock';
 import { createOrchestrator, Orchestrator } from './core/orchestrator';
 import { disconnectPrisma } from './services/db';
+import dotenv from 'dotenv';
+dotenv.config();
 
 function createServices(config: Config): {
   alpaca: AlpacaService;
@@ -26,19 +28,45 @@ function createServices(config: Config): {
   }
 }
 
-async function runCycle(orchestrator: Orchestrator): Promise<void> {
+async function runCycle(orchestrator: Orchestrator, symbols: string[]): Promise<void> {
   try {
-    const result = await orchestrator.runDailyCycle();
-    console.log('\nCycle Result Summary:');
-    console.log(`  Date: ${result.date}`);
-    console.log(`  Symbol: ${result.symbol}`);
-    console.log(`  Decision: ${result.aggregation.decision}`);
-    console.log(`  Weighted Score: ${result.aggregation.weightedScore.toFixed(3)}`);
-    if (result.trade) {
-      console.log(`  Trade: ${result.trade.side} ${result.trade.quantity} @ $${result.trade.filledPrice?.toFixed(2) || 'pending'}`);
+    const results = await orchestrator.runDailyCyclesForSymbols(symbols);
+    
+    console.log('\n' + '='.repeat(60));
+    console.log('Daily Cycle Summary');
+    console.log('='.repeat(60));
+    
+    for (const result of results) {
+      console.log(`\nSymbol: ${result.symbol}`);
+      console.log(`  Date: ${result.date}`);
+      console.log(`  Status: ${result.status}`);
+      if (result.status === 'completed') {
+        console.log(`  Decision: ${result.aggregation.decision}`);
+        console.log(`  Weighted Score: ${result.aggregation.weightedScore.toFixed(3)}`);
+        if (result.trade) {
+          console.log(`  Trade: ${result.trade.side} ${result.trade.quantity} @ $${result.trade.filledPrice?.toFixed(2) || 'pending'}`);
+        } else if (!result.riskResult.allowed) {
+          console.log(`  Trade blocked: ${result.riskResult.reason || 'Risk check failed'}`);
+        }
+      } else if (result.error) {
+        console.log(`  Error: ${result.error}`);
+      }
     }
-    console.log(`  Final Equity: $${result.finalSandbox.currentEquity.toFixed(2)}`);
-    console.log(`  Drawdown: ${(result.finalSandbox.drawdownPct * 100).toFixed(1)}%`);
+    
+    // Show final sandbox state (from last symbol processed)
+    if (results.length > 0) {
+      const lastResult = results[results.length - 1];
+      if (lastResult.status === 'completed') {
+        console.log(`\nFinal Portfolio State:`);
+        console.log(`  Equity: $${lastResult.finalSandbox.currentEquity.toFixed(2)}`);
+        console.log(`  Drawdown: ${(lastResult.finalSandbox.drawdownPct * 100).toFixed(1)}%`);
+        if (lastResult.finalSandbox.positionQty > 0) {
+          console.log(`  Position: ${lastResult.finalSandbox.positionQty} shares of ${lastResult.finalSandbox.positionSymbol}`);
+        }
+      }
+    }
+    
+    console.log('\n' + '='.repeat(60));
   } catch (error) {
     console.error('Cycle failed:', error);
   }
@@ -53,9 +81,11 @@ async function main(): Promise<void> {
 
   // Load configuration
   const config = loadConfig();
+  const symbols = config.tradingSymbols;
+  
   console.log('Configuration loaded:');
   console.log(`  Mode: ${config.mode}`);
-  console.log(`  Symbol: ${config.tradingSymbol}`);
+  console.log(`  Symbols: ${symbols.join(', ')} (${symbols.length} symbol(s))`);
   console.log(`  Allocated Capital: $${config.allocatedCapital}`);
   console.log(`  Position Size: ${config.positionSizePct * 100}%`);
   console.log(`  Max Drawdown: ${config.maxDrawdownPct * 100}%`);
@@ -73,7 +103,7 @@ async function main(): Promise<void> {
 
   if (runNow) {
     console.log('Running cycle immediately (--run-now flag detected)...\n');
-    await runCycle(orchestrator);
+    await runCycle(orchestrator, symbols);
     await disconnectPrisma();
     return;
   }
@@ -82,8 +112,8 @@ async function main(): Promise<void> {
   console.log(`Scheduling daily cycle with cron: ${config.cronSchedule}`);
 
   const task = cron.schedule(config.cronSchedule, async () => {
-    console.log(`\n[${new Date().toISOString()}] Cron triggered - starting daily cycle\n`);
-    await runCycle(orchestrator);
+    console.log(`\n[${new Date().toISOString()}] Cron triggered - starting daily cycle for ${symbols.length} symbol(s)\n`);
+    await runCycle(orchestrator, symbols);
   });
 
   console.log('Cron job scheduled. Waiting for next execution...');

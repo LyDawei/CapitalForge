@@ -72,19 +72,65 @@ export class Orchestrator {
   }
 
   async runDailyCycle(date?: string): Promise<CycleResult> {
-    const cycleDate = date || getTodayDate();
+    // Backward compatibility: use first symbol from config
     const symbol = this.config.tradingSymbol;
+    return this.runDailyCycleForSymbol(symbol, date);
+  }
+
+  /**
+   * Run daily cycles for multiple symbols sequentially.
+   * Uses a shared sandbox portfolio - only one position can be open at a time.
+   * If a symbol opens a position, subsequent symbols will be blocked from buying
+   * until that position is closed.
+   */
+  async runDailyCyclesForSymbols(symbols: string[], date?: string): Promise<CycleResult[]> {
+    const cycleDate = date || getTodayDate();
+    const results: CycleResult[] = [];
+
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`Starting daily cycles for ${symbols.length} symbol(s) on ${cycleDate}`);
+    console.log(`Symbols: ${symbols.join(', ')}`);
+    console.log(`Note: Using shared portfolio - only one position allowed at a time`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    for (const symbol of symbols) {
+      try {
+        const result = await this.runDailyCycleForSymbol(symbol, date);
+        results.push(result);
+      } catch (error) {
+        console.error(`Cycle failed for ${symbol}:`, error);
+        // Continue with next symbol even if one fails
+        results.push({
+          cycleId: '',
+          date: cycleDate,
+          symbol,
+          technicalData: {} as TechnicalData,
+          evaluations: [],
+          aggregation: { weightedScore: 0, decision: 'HOLD' },
+          riskResult: { allowed: false, reason: `Error: ${error}` },
+          finalSandbox: {} as SandboxContext,
+          status: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return results;
+  }
+
+  private async runDailyCycleForSymbol(symbol: string, date?: string): Promise<CycleResult> {
+    const cycleDate = date || getTodayDate();
 
     console.log(`\n${'='.repeat(60)}`);
     console.log(`Starting daily cycle for ${symbol} on ${cycleDate}`);
     console.log(`${'='.repeat(60)}\n`);
 
     try {
-      // Check if cycle already exists for this date
-      const existingCycle = await getDailyCycleByDate(cycleDate);
+      // Check if cycle already exists for this date and symbol
+      const existingCycle = await getDailyCycleByDate(cycleDate, symbol);
       if (existingCycle) {
-        console.log(`Cycle already exists for ${cycleDate}, skipping...`);
-        throw new Error(`Cycle already exists for ${cycleDate}`);
+        console.log(`Cycle already exists for ${symbol} on ${cycleDate}, skipping...`);
+        throw new Error(`Cycle already exists for ${symbol} on ${cycleDate}`);
       }
 
       // STEP 1: FETCH daily bars from Alpaca
@@ -108,17 +154,22 @@ export class Orchestrator {
       console.log(`  Cycle ID: ${cycleId}`);
 
       // STEP 4: LOAD sandbox state (or initialize if first run)
+      // Note: Sandbox is shared across all symbols - state persists between symbol cycles
       console.log('Step 4: Loading sandbox state...');
       let sandbox = await getLatestSandboxState();
       if (!sandbox) {
         console.log('  No existing sandbox, initializing...');
         sandbox = initializeSandbox(this.config.allocatedCapital);
       } else {
-        // Mark to market with current price
+        // Mark to market with current price (updates equity if holding a position)
         sandbox = markToMarket(sandbox, technicalData.close);
       }
       console.log(`  Equity: $${sandbox.currentEquity.toFixed(2)}`);
-      console.log(`  Position: ${sandbox.positionQty} shares`);
+      if (sandbox.positionQty > 0) {
+        console.log(`  Position: ${sandbox.positionQty} shares of ${sandbox.positionSymbol}`);
+      } else {
+        console.log(`  Position: None (flat)`);
+      }
       console.log(`  Drawdown: ${(sandbox.drawdownPct * 100).toFixed(1)}%`);
 
       // STEP 5: RUN AGENTS (in parallel)
@@ -299,7 +350,7 @@ export class Orchestrator {
 
       // Try to mark cycle as failed if it was created
       try {
-        const cycle = await getDailyCycleByDate(cycleDate);
+        const cycle = await getDailyCycleByDate(cycleDate, symbol);
         if (cycle && cycle.status === 'pending') {
           await updateCycleStatus(cycle.id, 'failed');
         }
