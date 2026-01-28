@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { Config } from '../config';
 import { AgentOutput, AgentOutputSchema } from '../types';
 
@@ -7,20 +7,20 @@ export interface LLMService {
 }
 
 export class RealLLMService implements LLMService {
-  private client: Anthropic;
+  private client: OpenAI;
   private model: string;
   private temperature: number;
 
   constructor(config: Config) {
-    this.client = new Anthropic({
-      apiKey: config.anthropicApiKey,
+    this.client = new OpenAI({
+      apiKey: config.openaiApiKey,
     });
     this.model = config.llmModel;
     this.temperature = config.llmTemperature;
   }
 
   async complete(prompt: string): Promise<{ parsed: AgentOutput; raw: string }> {
-    const response = await this.client.messages.create({
+    const response = await this.client.chat.completions.create({
       model: this.model,
       max_tokens: 1024,
       temperature: this.temperature,
@@ -33,12 +33,12 @@ export class RealLLMService implements LLMService {
     });
 
     // Extract text content from response
-    const textContent = response.content.find((c) => c.type === 'text');
-    if (!textContent || textContent.type !== 'text') {
-      throw new Error('No text content in LLM response');
+    const message = response.choices[0]?.message;
+    if (!message || !message.content) {
+      throw new Error('No content in LLM response');
     }
 
-    const raw = textContent.text;
+    const raw = message.content;
 
     // Parse JSON from response
     const parsed = this.parseResponse(raw);

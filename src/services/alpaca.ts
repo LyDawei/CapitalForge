@@ -12,8 +12,7 @@ export interface AlpacaService {
 }
 
 interface AlpacaBarResponse {
-  bars: {
-    [symbol: string]: Array<{
+  bars:  Array<{
       t: string; // timestamp
       o: number; // open
       h: number; // high
@@ -21,7 +20,6 @@ interface AlpacaBarResponse {
       c: number; // close
       v: number; // volume
     }>;
-  };
 }
 
 interface AlpacaOrderResponse {
@@ -61,7 +59,11 @@ export class RealAlpacaService implements AlpacaService {
   async getDailyBars(symbol: string, limit: number): Promise<DailyBar[]> {
     // Calculate the start date (we need enough historical data)
     const endDate = new Date();
-    const startDate = new Date();
+    endDate.setDate(endDate.getDate() - 1); // Yesterday
+    // Skip weekends
+    while (endDate.getDay() === 0 || endDate.getDay() === 6) {
+      endDate.setDate(endDate.getDate() - 1);
+    }    const startDate = new Date();
     startDate.setDate(startDate.getDate() - Math.ceil(limit * 1.5)); // Extra buffer for weekends/holidays
 
     const params = new URLSearchParams({
@@ -69,6 +71,7 @@ export class RealAlpacaService implements AlpacaService {
       end: endDate.toISOString().split('T')[0],
       timeframe: '1Day',
       limit: limit.toString(),
+      feed:'iex'
     });
 
     const url = `${this.dataBaseUrl}/v2/stocks/${symbol}/bars?${params}`;
@@ -78,13 +81,14 @@ export class RealAlpacaService implements AlpacaService {
       headers: this.getHeaders(),
     });
 
+
     if (!response.ok) {
       const error = await response.text();
       throw new Error(`Alpaca API error: ${response.status} - ${error}`);
     }
 
     const data = (await response.json()) as AlpacaBarResponse;
-    const bars = data.bars[symbol] || [];
+    const bars = data.bars || [];
 
     return bars.map((bar) => ({
       timestamp: bar.t,

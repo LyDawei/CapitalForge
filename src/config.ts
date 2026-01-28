@@ -9,17 +9,18 @@ const ConfigSchema = z.object({
   alpacaApiSecret: z.string().min(1),
   alpacaBaseUrl: z.string().url(),
 
-  // Anthropic API
-  anthropicApiKey: z.string().min(1),
+  // OpenAI API
+  openaiApiKey: z.string().min(1),
 
   // Trading Configuration
-  tradingSymbol: z.string().min(1).default('SPY'),
+  tradingSymbol: z.string().min(1).default('SPY'), // Deprecated: use tradingSymbols instead
+  tradingSymbols: z.array(z.string().min(1)).default(['SPY']),
   allocatedCapital: z.number().positive().default(200),
   positionSizePct: z.number().min(0).max(1).default(0.2),
   maxDrawdownPct: z.number().min(0).max(1).default(0.2),
 
   // LLM Configuration
-  llmModel: z.string().default('claude-3-5-sonnet-20241022'),
+  llmModel: z.string().default('gpt-4o'),
   llmTemperature: z.number().min(0).max(1).default(0.2),
 
   // Scheduler
@@ -37,18 +38,37 @@ function parseNumber(value: string | undefined, defaultValue: number): number {
   return isNaN(parsed) ? defaultValue : parsed;
 }
 
+function parseTradingSymbols(): string[] {
+  // Check for TRADING_SYMBOLS first (comma-separated)
+  if (process.env.TRADING_SYMBOLS) {
+    return process.env.TRADING_SYMBOLS.split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+  }
+  // Fall back to TRADING_SYMBOL for backward compatibility
+  if (process.env.TRADING_SYMBOL) {
+    return [process.env.TRADING_SYMBOL];
+  }
+  // Default to SPY
+  return ['SPY'];
+}
+
 export function loadConfig(): Config {
+  const tradingSymbols = parseTradingSymbols();
+  const tradingSymbol = tradingSymbols[0]; // For backward compatibility
+  
   const rawConfig = {
     databaseUrl: process.env.DATABASE_URL,
     alpacaApiKey: process.env.ALPACA_API_KEY,
     alpacaApiSecret: process.env.ALPACA_API_SECRET,
     alpacaBaseUrl: process.env.ALPACA_BASE_URL || 'https://paper-api.alpaca.markets',
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-    tradingSymbol: process.env.TRADING_SYMBOL || 'SPY',
+    openaiApiKey: process.env.OPENAI_API_KEY,
+    tradingSymbol,
+    tradingSymbols,
     allocatedCapital: parseNumber(process.env.ALLOCATED_CAPITAL, 200),
     positionSizePct: parseNumber(process.env.POSITION_SIZE_PCT, 0.2),
     maxDrawdownPct: parseNumber(process.env.MAX_DRAWDOWN_PCT, 0.2),
-    llmModel: process.env.LLM_MODEL || 'claude-3-5-sonnet-20241022',
+    llmModel: process.env.LLM_MODEL || 'gpt-4o',
     llmTemperature: parseNumber(process.env.LLM_TEMPERATURE, 0.2),
     cronSchedule: process.env.CRON_SCHEDULE || '35 9 * * 1-5',
     mode: (process.env.MODE || 'mock') as 'mock' | 'paper',
@@ -58,7 +78,7 @@ export function loadConfig(): Config {
 
   if (!result.success) {
     console.error('Configuration validation failed:');
-    console.error(result.error.format());
+    console.error(JSON.stringify(result.error.format(), null, 2));
     throw new Error('Invalid configuration');
   }
 

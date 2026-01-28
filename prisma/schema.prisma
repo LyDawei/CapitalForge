@@ -4,12 +4,11 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model DailyCycle {
   id            String   @id @default(uuid())
-  date          String   @unique // YYYY-MM-DD
+  date          String   // YYYY-MM-DD
   symbol        String
   technicalData Json     // RSI, SMA20, SMA50, MACD, volume, avgVolume, close
   status        String   // pending | completed | failed
@@ -18,6 +17,8 @@ model DailyCycle {
   evaluations AgentEvaluation[]
   decision    AggregatedDecision?
   trade       Trade?
+
+  @@unique([date, symbol])
 }
 
 model AgentEvaluation {
@@ -31,7 +32,7 @@ model AgentEvaluation {
   rawResponse   String   // Full LLM response for debugging
   createdAt     DateTime @default(now())
 
-  cycle DailyCycle @relation(fields: [cycleId], references: [id])
+  cycle DailyCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
 
   @@index([cycleId])
 }
@@ -45,7 +46,7 @@ model AggregatedDecision {
   riskReason    String?
   createdAt     DateTime @default(now())
 
-  cycle DailyCycle @relation(fields: [cycleId], references: [id])
+  cycle DailyCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
 }
 
 model Trade {
@@ -60,7 +61,7 @@ model Trade {
   createdAt     DateTime  @default(now())
   filledAt      DateTime?
 
-  cycle DailyCycle @relation(fields: [cycleId], references: [id])
+  cycle DailyCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
 }
 
 model SandboxState {
