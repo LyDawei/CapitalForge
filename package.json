@@ -13,8 +13,8 @@
     "start": "node dist/src/index.js",
     "run-cycle": "ts-node scripts/runCycle.ts",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev --url postgresql://capitalforge:capitalforge@localhost:5432/capitalforge?schema=public",
-    "prisma:studio": "prisma studio --url postgresql://capitalforge:capitalforge@localhost:5432/capitalforge?schema=public",
+    "prisma:migrate": "prisma migrate dev --url postgresql://capitalforge:capitalforge@capitalforge:5432/capitalforge?schema=public",
+    "prisma:studio": "prisma studio --url postgresql://capitalforge:capitalforge@capitalforge:5432/capitalforge?schema=public",
     "test": "jest",
     "test:coverage": "jest --coverage"
   },
