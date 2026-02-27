@@ -1,5 +1,5 @@
 import { Config } from '../config';
-import { DailyBar, AlpacaOrder } from '../types';
+import { DailyBar, AlpacaOrder, AlpacaPosition } from '../types';
 
 export interface AlpacaService {
   getDailyBars(symbol: string, limit: number): Promise<DailyBar[]>;
@@ -9,6 +9,7 @@ export interface AlpacaService {
     side: 'buy' | 'sell'
   ): Promise<AlpacaOrder>;
   getOrder(orderId: string): Promise<AlpacaOrder>;
+  getPositions(): Promise<AlpacaPosition[]>;
 }
 
 interface AlpacaBarResponse {
@@ -32,6 +33,16 @@ interface AlpacaOrderResponse {
   status: string;
   created_at: string;
   filled_at: string | null;
+}
+
+interface AlpacaPositionResponse {
+  symbol: string;
+  qty: string;
+  avg_entry_price: string;
+  current_price?: string;
+  market_value?: string;
+  cost_basis?: string;
+  side?: 'long' | 'short';
 }
 
 export class RealAlpacaService implements AlpacaService {
@@ -147,6 +158,23 @@ export class RealAlpacaService implements AlpacaService {
     return this.mapOrderResponse(order);
   }
 
+  async getPositions(): Promise<AlpacaPosition[]> {
+    const url = `${this.baseUrl}/v2/positions`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Alpaca positions fetch error: ${response.status} - ${error}`);
+    }
+
+    const positions = (await response.json()) as AlpacaPositionResponse[];
+    return positions.map((position) => this.mapPositionResponse(position));
+  }
+
   private mapOrderResponse(order: AlpacaOrderResponse): AlpacaOrder {
     return {
       id: order.id,
@@ -160,6 +188,18 @@ export class RealAlpacaService implements AlpacaService {
       status: order.status,
       createdAt: order.created_at,
       filledAt: order.filled_at || undefined,
+    };
+  }
+
+  private mapPositionResponse(position: AlpacaPositionResponse): AlpacaPosition {
+    return {
+      symbol: position.symbol,
+      qty: parseFloat(position.qty),
+      avgEntryPrice: parseFloat(position.avg_entry_price),
+      currentPrice: position.current_price ? parseFloat(position.current_price) : undefined,
+      marketValue: position.market_value ? parseFloat(position.market_value) : undefined,
+      costBasis: position.cost_basis ? parseFloat(position.cost_basis) : undefined,
+      side: position.side,
     };
   }
 }

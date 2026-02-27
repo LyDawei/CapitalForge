@@ -114,6 +114,17 @@ export interface AlpacaOrder {
   filledAt?: string;
 }
 
+// Position from Alpaca
+export interface AlpacaPosition {
+  symbol: string;
+  qty: number;
+  avgEntryPrice: number;
+  currentPrice?: number;
+  marketValue?: number;
+  costBasis?: number;
+  side?: 'long' | 'short';
+}
+
 // Agent evaluation for persistence
 export interface AgentEvaluationInput {
   cycleId: string;

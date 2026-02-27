@@ -1,5 +1,5 @@
 import { AlpacaService } from './alpaca';
-import { DailyBar, AlpacaOrder } from '../types';
+import { DailyBar, AlpacaOrder, AlpacaPosition } from '../types';
 
 // Deterministic mock data for testing
 // Generates consistent data based on symbol and date
@@ -57,6 +57,7 @@ function getBasePrice(symbol: string): number {
 export class MockAlpacaService implements AlpacaService {
   private orderCounter = 0;
   private orders: Map<string, AlpacaOrder> = new Map();
+  private position: AlpacaPosition | null = null;
 
   async getDailyBars(symbol: string, limit: number): Promise<DailyBar[]> {
     // Simulate slight network delay (deterministic)
@@ -90,6 +91,7 @@ export class MockAlpacaService implements AlpacaService {
       filledAt: new Date().toISOString(),
     };
 
+    this.updatePosition(symbol, qty, side, currentPrice);
     this.orders.set(orderId, order);
     return order;
   }
@@ -104,6 +106,11 @@ export class MockAlpacaService implements AlpacaService {
     return order;
   }
 
+  async getPositions(): Promise<AlpacaPosition[]> {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    return this.position ? [this.position] : [];
+  }
+
   // For testing - get current mock price
   getCurrentPrice(symbol: string): number {
     return getBasePrice(symbol);
@@ -113,6 +120,59 @@ export class MockAlpacaService implements AlpacaService {
   reset(): void {
     this.orderCounter = 0;
     this.orders.clear();
+    this.position = null;
+  }
+
+  private updatePosition(
+    symbol: string,
+    qty: number,
+    side: 'buy' | 'sell',
+    fillPrice: number
+  ): void {
+    const signedQty = side === 'buy' ? qty : -qty;
+
+    if (!this.position) {
+      if (side === 'sell') {
+        // No position to sell in mock; ignore.
+        return;
+      }
+
+      this.position = {
+        symbol,
+        qty: qty,
+        avgEntryPrice: fillPrice,
+        currentPrice: fillPrice,
+        marketValue: qty * fillPrice,
+        costBasis: qty * fillPrice,
+        side: 'long',
+      };
+      return;
+    }
+
+    if (this.position.symbol !== symbol) {
+      // Enforce single-position constraint in mock
+      return;
+    }
+
+    const newQty = this.position.qty + signedQty;
+
+    if (newQty <= 0) {
+      this.position = null;
+      return;
+    }
+
+    if (side === 'buy') {
+      const previousCost = this.position.qty * this.position.avgEntryPrice;
+      const addedCost = qty * fillPrice;
+      const totalCost = previousCost + addedCost;
+      this.position.avgEntryPrice = totalCost / newQty;
+    }
+
+    this.position.qty = newQty;
+    this.position.currentPrice = fillPrice;
+    this.position.marketValue = newQty * fillPrice;
+    this.position.costBasis = this.position.avgEntryPrice * newQty;
+    this.position.side = 'long';
   }
 }
 
