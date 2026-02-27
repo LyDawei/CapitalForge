@@ -15,7 +15,7 @@ const ConfigSchema = z.object({
   // Trading Configuration
   tradingSymbol: z.string().min(1).default('SPY'), // Deprecated: use tradingSymbols instead
   tradingSymbols: z.array(z.string().min(1)).default(['SPY']),
-  allocatedCapital: z.number().positive().default(200),
+  allocatedCapital: z.number().positive().default(2000),
   positionSizePct: z.number().min(0).max(1).default(0.2),
   maxDrawdownPct: z.number().min(0).max(1).default(0.2),
 
@@ -65,7 +65,7 @@ export function loadConfig(): Config {
     openaiApiKey: process.env.OPENAI_API_KEY,
     tradingSymbol,
     tradingSymbols,
-    allocatedCapital: parseNumber(process.env.ALLOCATED_CAPITAL, 200),
+    allocatedCapital: parseNumber(process.env.ALLOCATED_CAPITAL, 2000),
     positionSizePct: parseNumber(process.env.POSITION_SIZE_PCT, 0.2),
     maxDrawdownPct: parseNumber(process.env.MAX_DRAWDOWN_PCT, 0.2),
     llmModel: process.env.LLM_MODEL || 'gpt-4o',

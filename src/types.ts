@@ -67,7 +67,29 @@ export interface AggregationResult {
 }
 
 // Agent names
-export type AgentName = 'momentum' | 'meanReversion' | 'confirmation';
+export type AgentName = 'momentum' | 'meanReversion' | 'confirmation' | 'newsEvents';
+
+// News data types
+export interface NewsArticle {
+  headline: string;
+  summary: string;
+  source: string;
+  createdAt: string;
+  symbols: string[];
+  url: string;
+}
+
+export interface WebSearchResult {
+  title: string;
+  snippet: string;
+  url: string;
+}
+
+export interface NewsData {
+  articles: NewsArticle[];
+  searchResults: WebSearchResult[];
+  fetchedAt: string;
+}
 
 // Daily bar from Alpaca
 export interface DailyBar {

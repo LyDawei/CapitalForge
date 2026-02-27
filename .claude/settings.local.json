@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge && npm run build 2>&1)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge && npx tsc --noEmit 2>&1)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge && ls node_modules/.bin/tsc* 2>&1 && npx typescript --version 2>&1)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge && npm install 2>&1)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge && npx jest 2>&1)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge && npx create-next-app@latest dashboard --typescript --tailwind --eslint --app --no-src-dir --import-alias \"@/*\" --use-npm 2>&1)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge/dashboard && npm install @prisma/client recharts 2>&1 && npm install -D prisma 2>&1)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge/dashboard && npx prisma generate 2>&1222)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge/dashboard && npm install @prisma/config 2>&1)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge/dashboard && npx prisma generate 2>&1)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge/dashboard && npm run build 2>&1)",
+      "Bash(head:*)",
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge/dashboard && npm install @prisma/adapter-pg pg && npm install -D @types/pg 2>&1)"
+    ]
+  }
+}

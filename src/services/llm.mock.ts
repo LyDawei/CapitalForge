@@ -52,8 +52,10 @@ export class MockLLMService implements LLMService {
     return 0;
   }
 
-  private detectAgentType(prompt: string): 'momentum' | 'meanReversion' | 'confirmation' {
-    if (prompt.toLowerCase().includes('momentum')) {
+  private detectAgentType(prompt: string): 'momentum' | 'meanReversion' | 'confirmation' | 'newsEvents' {
+    if (prompt.toLowerCase().includes('news and events analyst')) {
+      return 'newsEvents';
+    } else if (prompt.toLowerCase().includes('momentum')) {
       return 'momentum';
     } else if (prompt.toLowerCase().includes('mean reversion')) {
       return 'meanReversion';
@@ -64,7 +66,7 @@ export class MockLLMService implements LLMService {
   }
 
   private calculateScore(
-    agentType: 'momentum' | 'meanReversion' | 'confirmation',
+    agentType: 'momentum' | 'meanReversion' | 'confirmation' | 'newsEvents',
     rsi: number,
     sma20: number,
     sma50: number,
@@ -146,6 +148,14 @@ export class MockLLMService implements LLMService {
         }
 
         confidence += 0.15;
+        break;
+
+      case 'newsEvents':
+        // News agent: mildly positive with low confidence for mock data
+        bullishScore = 0.15;
+        confidence = 0.3;
+        rationale.push('Mock: Mild positive news sentiment detected');
+        rationale.push('Mock: No major catalysts identified');
         break;
     }
 

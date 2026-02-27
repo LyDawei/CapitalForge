@@ -4,6 +4,8 @@ import { createAlpacaService, AlpacaService } from './services/alpaca';
 import { createMockAlpacaService } from './services/alpaca.mock';
 import { createLLMService, LLMService } from './services/llm';
 import { createMockLLMService } from './services/llm.mock';
+import { createNewsService, NewsService } from './services/news';
+import { createMockNewsService } from './services/news.mock';
 import { createOrchestrator, Orchestrator } from './core/orchestrator';
 import { disconnectPrisma } from './services/db';
 import dotenv from 'dotenv';
@@ -12,18 +14,21 @@ dotenv.config();
 function createServices(config: Config): {
   alpaca: AlpacaService;
   llm: LLMService;
+  news: NewsService;
 } {
   if (config.mode === 'mock') {
     console.log('Running in MOCK mode');
     return {
       alpaca: createMockAlpacaService(),
       llm: createMockLLMService(),
+      news: createMockNewsService(),
     };
   } else {
     console.log('Running in PAPER trading mode');
     return {
       alpaca: createAlpacaService(config),
       llm: createLLMService(config),
+      news: createNewsService(config),
     };
   }
 }
@@ -93,10 +98,10 @@ async function main(): Promise<void> {
   console.log('');
 
   // Create services
-  const { alpaca, llm } = createServices(config);
+  const { alpaca, llm, news } = createServices(config);
 
   // Create orchestrator
-  const orchestrator = createOrchestrator(config, alpaca, llm);
+  const orchestrator = createOrchestrator(config, alpaca, llm, news);
 
   // Check if we should run immediately (for testing)
   const runNow = process.argv.includes('--run-now');

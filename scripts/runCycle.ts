@@ -11,6 +11,8 @@ import { createAlpacaService, AlpacaService } from '../src/services/alpaca';
 import { createMockAlpacaService } from '../src/services/alpaca.mock';
 import { createLLMService, LLMService } from '../src/services/llm';
 import { createMockLLMService } from '../src/services/llm.mock';
+import { createNewsService, NewsService } from '../src/services/news';
+import { createMockNewsService } from '../src/services/news.mock';
 import { createOrchestrator } from '../src/core/orchestrator';
 import { disconnectPrisma, getPrismaClient } from '../src/services/db';
 import { getTodayDate } from '../src/types';
@@ -31,18 +33,21 @@ function parseArgs(): { date?: string } {
 function createServices(config: Config): {
   alpaca: AlpacaService;
   llm: LLMService;
+  news: NewsService;
 } {
   if (config.mode === 'mock') {
     console.log('Running in MOCK mode');
     return {
       alpaca: createMockAlpacaService(),
       llm: createMockLLMService(),
+      news: createMockNewsService(),
     };
   } else {
     console.log('Running in PAPER trading mode');
     return {
       alpaca: createAlpacaService(config),
       llm: createLLMService(config),
+      news: createNewsService(config),
     };
   }
 }
@@ -80,10 +85,10 @@ async function main(): Promise<void> {
   }
 
   // Create services
-  const { alpaca, llm } = createServices(config);
+  const { alpaca, llm, news } = createServices(config);
 
   // Create orchestrator
-  const orchestrator = createOrchestrator(config, alpaca, llm);
+  const orchestrator = createOrchestrator(config, alpaca, llm, news);
 
   try {
     // Run cycles for all symbols

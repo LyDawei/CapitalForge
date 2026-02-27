@@ -202,6 +202,18 @@ export async function createSandboxState(
   return state.id;
 }
 
+/**
+ * Save a sandbox snapshot. Each symbol's cycle creates a new snapshot so the
+ * most recent record always reflects the true portfolio state. This is safe
+ * now that date is no longer @unique.
+ */
+export async function saveSandboxSnapshot(
+  date: string,
+  sandbox: SandboxContext
+): Promise<string> {
+  return createSandboxState(date, sandbox);
+}
+
 export async function getOrCreatePromptVersion(
   agentName: string,
   version: string,

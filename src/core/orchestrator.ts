@@ -10,24 +10,27 @@ import {
   createTrade,
   updateTradeStatus,
   getLatestSandboxState,
-  createSandboxState,
+  saveSandboxSnapshot,
   getOrCreatePromptVersion,
 } from '../services/db';
 import { calculateTechnicals, getMinimumBarsRequired } from './technicals';
 import { checkRisk, initializeSandbox, calculateUpdatedSandbox, markToMarket } from './riskManager';
 import { aggregate } from './aggregator';
-import { getPromptTemplate, PROMPT_VERSIONS } from '../prompts';
+import { getPromptTemplate, getNewsPromptTemplate, PROMPT_VERSIONS } from '../prompts';
 import {
   TechnicalData,
   SandboxContext,
   AgentOutput,
   AgentName,
+  NewsData,
   getTodayDate,
 } from '../types';
+import { NewsService } from '../services/news';
 
 import * as momentumAgent from '../agents/momentum';
 import * as meanReversionAgent from '../agents/meanReversion';
 import * as confirmationAgent from '../agents/confirmation';
+import * as newsEventsAgent from '../agents/newsEvents';
 
 export interface CycleResult {
   cycleId: string;
@@ -64,24 +67,27 @@ export class Orchestrator {
   private config: Config;
   private alpaca: AlpacaService;
   private llm: LLMService;
+  private news: NewsService | null;
 
-  constructor(config: Config, alpaca: AlpacaService, llm: LLMService) {
+  constructor(config: Config, alpaca: AlpacaService, llm: LLMService, news?: NewsService) {
     this.config = config;
     this.alpaca = alpaca;
     this.llm = llm;
+    this.news = news || null;
   }
 
   async runDailyCycle(date?: string): Promise<CycleResult> {
     // Backward compatibility: use first symbol from config
     const symbol = this.config.tradingSymbol;
-    return this.runDailyCycleForSymbol(symbol, date);
+    const results = await this.runDailyCyclesForSymbols([symbol], date);
+    return results[0];
   }
 
   /**
    * Run daily cycles for multiple symbols sequentially.
    * Uses a shared sandbox portfolio - only one position can be open at a time.
-   * If a symbol opens a position, subsequent symbols will be blocked from buying
-   * until that position is closed.
+   * The sandbox is loaded once at the start and threaded through each symbol's
+   * cycle so that cash balance, position state, and drawdown are always current.
    */
   async runDailyCyclesForSymbols(symbols: string[], date?: string): Promise<CycleResult[]> {
     const cycleDate = date || getTodayDate();
@@ -90,16 +96,29 @@ export class Orchestrator {
     console.log(`\n${'='.repeat(60)}`);
     console.log(`Starting daily cycles for ${symbols.length} symbol(s) on ${cycleDate}`);
     console.log(`Symbols: ${symbols.join(', ')}`);
-    console.log(`Note: Using shared portfolio - only one position allowed at a time`);
+    console.log(`Note: Using shared portfolio ($${this.config.allocatedCapital} limit) - only one position allowed at a time`);
     console.log(`${'='.repeat(60)}\n`);
+
+    // Load sandbox ONCE at the start of the day's cycles
+    let sharedSandbox = await getLatestSandboxState();
+    if (!sharedSandbox) {
+      console.log('No existing sandbox, initializing...');
+      sharedSandbox = initializeSandbox(this.config.allocatedCapital);
+    }
+    console.log(`Shared wallet: $${sharedSandbox.cashBalance.toFixed(2)} cash, $${sharedSandbox.currentEquity.toFixed(2)} equity`);
+    if (sharedSandbox.positionQty > 0) {
+      console.log(`  Existing position: ${sharedSandbox.positionQty} shares of ${sharedSandbox.positionSymbol}`);
+    }
 
     for (const symbol of symbols) {
       try {
-        const result = await this.runDailyCycleForSymbol(symbol, date);
+        const result = await this.runDailyCycleForSymbol(symbol, cycleDate, sharedSandbox);
         results.push(result);
+        // Thread the updated sandbox to the next symbol
+        sharedSandbox = result.finalSandbox;
       } catch (error) {
         console.error(`Cycle failed for ${symbol}:`, error);
-        // Continue with next symbol even if one fails
+        // Continue with next symbol even if one fails — sandbox state preserved
         results.push({
           cycleId: '',
           date: cycleDate,
@@ -108,7 +127,7 @@ export class Orchestrator {
           evaluations: [],
           aggregation: { weightedScore: 0, decision: 'HOLD' },
           riskResult: { allowed: false, reason: `Error: ${error}` },
-          finalSandbox: {} as SandboxContext,
+          finalSandbox: sharedSandbox,
           status: 'failed',
           error: error instanceof Error ? error.message : String(error),
         });
@@ -118,9 +137,7 @@ export class Orchestrator {
     return results;
   }
 
-  private async runDailyCycleForSymbol(symbol: string, date?: string): Promise<CycleResult> {
-    const cycleDate = date || getTodayDate();
-
+  private async runDailyCycleForSymbol(symbol: string, cycleDate: string, incomingSandbox: SandboxContext): Promise<CycleResult> {
     console.log(`\n${'='.repeat(60)}`);
     console.log(`Starting daily cycle for ${symbol} on ${cycleDate}`);
     console.log(`${'='.repeat(60)}\n`);
@@ -153,17 +170,11 @@ export class Orchestrator {
       const cycleId = await createDailyCycle(cycleDate, symbol, technicalData);
       console.log(`  Cycle ID: ${cycleId}`);
 
-      // STEP 4: LOAD sandbox state (or initialize if first run)
-      // Note: Sandbox is shared across all symbols - state persists between symbol cycles
-      console.log('Step 4: Loading sandbox state...');
-      let sandbox = await getLatestSandboxState();
-      if (!sandbox) {
-        console.log('  No existing sandbox, initializing...');
-        sandbox = initializeSandbox(this.config.allocatedCapital);
-      } else {
-        // Mark to market with current price (updates equity if holding a position)
-        sandbox = markToMarket(sandbox, technicalData.close);
-      }
+      // STEP 4: USE shared sandbox state (passed from parent loop)
+      // Mark to market with current price (updates equity if holding a position)
+      console.log('Step 4: Using shared sandbox state...');
+      let sandbox = markToMarket(incomingSandbox, technicalData.close);
+      console.log(`  Cash: $${sandbox.cashBalance.toFixed(2)}`);
       console.log(`  Equity: $${sandbox.currentEquity.toFixed(2)}`);
       if (sandbox.positionQty > 0) {
         console.log(`  Position: ${sandbox.positionQty} shares of ${sandbox.positionSymbol}`);
@@ -172,13 +183,31 @@ export class Orchestrator {
       }
       console.log(`  Drawdown: ${(sandbox.drawdownPct * 100).toFixed(1)}%`);
 
+      // STEP 4.5: FETCH NEWS DATA (if news service available)
+      let newsData: NewsData | null = null;
+      if (this.news) {
+        console.log('Step 4.5: Fetching news data...');
+        try {
+          newsData = await this.news.fetchNewsData(symbol);
+          console.log(`  Fetched ${newsData.articles.length} articles, ${newsData.searchResults.length} search results`);
+        } catch (error) {
+          console.error('  News fetch failed (continuing without news):', error);
+        }
+      }
+
       // STEP 5: RUN AGENTS (in parallel)
       console.log('Step 5: Running agents...');
-      const agentResults = await Promise.all([
+      const agentPromises: Promise<{ agentName: AgentName; output: AgentOutput; rawResponse: string }>[] = [
         this.runAgent('momentum', momentumAgent, technicalData, sandbox),
         this.runAgent('meanReversion', meanReversionAgent, technicalData, sandbox),
         this.runAgent('confirmation', confirmationAgent, technicalData, sandbox),
-      ]);
+      ];
+
+      if (newsData) {
+        agentPromises.push(this.runNewsAgent(newsData, technicalData, sandbox));
+      }
+
+      const agentResults = await Promise.all(agentPromises);
 
       // STEP 6 & 7: VALIDATE and PERSIST evaluations
       console.log('Step 6-7: Persisting agent evaluations...');
@@ -186,10 +215,13 @@ export class Orchestrator {
 
       for (const result of agentResults) {
         // Store prompt version
+        const promptTemplate = result.agentName === 'newsEvents'
+          ? getNewsPromptTemplate()
+          : getPromptTemplate(result.agentName);
         await getOrCreatePromptVersion(
           result.agentName,
           PROMPT_VERSIONS[result.agentName],
-          getPromptTemplate(result.agentName)
+          promptTemplate
         );
 
         // Store evaluation
@@ -320,9 +352,9 @@ export class Orchestrator {
         finalSandbox = markToMarket(sandbox, technicalData.close);
       }
 
-      // Save updated sandbox state
-      await createSandboxState(cycleDate, finalSandbox);
-      console.log(`  Final equity: $${finalSandbox.currentEquity.toFixed(2)}`);
+      // Save sandbox snapshot (persists after each symbol so state survives crashes)
+      await saveSandboxSnapshot(cycleDate, finalSandbox);
+      console.log(`  Wallet: $${finalSandbox.cashBalance.toFixed(2)} cash, $${finalSandbox.currentEquity.toFixed(2)} equity`);
       console.log(`  Final drawdown: ${(finalSandbox.drawdownPct * 100).toFixed(1)}%`);
 
       // STEP 14: COMPLETE cycle
@@ -377,9 +409,34 @@ export class Orchestrator {
       return { agentName, output, rawResponse };
     } catch (error) {
       console.error(`Agent ${agentName} failed:`, error);
-      // Return neutral output on failure
       return {
         agentName,
+        output: {
+          bullishScore: 0,
+          confidence: 0,
+          rationale: [`Agent error: ${error}`],
+        },
+        rawResponse: `Error: ${error}`,
+      };
+    }
+  }
+
+  private async runNewsAgent(
+    newsData: NewsData,
+    data: TechnicalData,
+    sandbox: SandboxContext
+  ): Promise<{
+    agentName: AgentName;
+    output: AgentOutput;
+    rawResponse: string;
+  }> {
+    try {
+      const { output, rawResponse } = await newsEventsAgent.evaluate(data, sandbox, this.llm, newsData);
+      return { agentName: 'newsEvents', output, rawResponse };
+    } catch (error) {
+      console.error('Agent newsEvents failed:', error);
+      return {
+        agentName: 'newsEvents',
         output: {
           bullishScore: 0,
           confidence: 0,
@@ -394,7 +451,8 @@ export class Orchestrator {
 export function createOrchestrator(
   config: Config,
   alpaca: AlpacaService,
-  llm: LLMService
+  llm: LLMService,
+  news?: NewsService
 ): Orchestrator {
-  return new Orchestrator(config, alpaca, llm);
+  return new Orchestrator(config, alpaca, llm, news);
 }
