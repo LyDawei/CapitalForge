@@ -1,0 +1,25 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy root manifests for npm workspaces
+COPY package.json package-lock.json tsconfig.base.json turbo.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/engine/package.json ./packages/engine/
+COPY packages/api/package.json ./packages/api/
+COPY packages/ui/package.json ./packages/ui/
+
+RUN npm ci
+
+# Copy source for shared + engine
+COPY packages/shared ./packages/shared
+COPY packages/engine ./packages/engine
+
+# Build shared, generate Prisma client, build engine
+RUN npm run build -w @capitalforge/shared && \
+    npm run prisma:generate -w @capitalforge/engine && \
+    npm run build -w @capitalforge/engine
+
+WORKDIR /app/packages/engine
+
+CMD ["node", "dist/src/index.js"]

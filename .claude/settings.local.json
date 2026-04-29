@@ -13,7 +13,12 @@
       "Bash(cd /c/Users/David.Ly/repos/CapitalForge/dashboard && npx prisma generate 2>&1)",
       "Bash(cd /c/Users/David.Ly/repos/CapitalForge/dashboard && npm run build 2>&1)",
       "Bash(head:*)",
-      "Bash(cd /c/Users/David.Ly/repos/CapitalForge/dashboard && npm install @prisma/adapter-pg pg && npm install -D @types/pg 2>&1)"
+      "Bash(cd /c/Users/David.Ly/repos/CapitalForge/dashboard && npm install @prisma/adapter-pg pg && npm install -D @types/pg 2>&1)",
+      "Bash(git ls-tree *)",
+      "WebSearch",
+      "Bash(git -C C:/Users/David.Ly/repos/CapitalForge log --oneline -20)",
+      "Bash(git -C C:/Users/David.Ly/repos/CapitalForge ls-files dashboard)",
+      "Bash(npm run *)"
     ]
   }
 }
