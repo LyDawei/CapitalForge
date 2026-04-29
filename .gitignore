@@ -25,7 +25,12 @@ npm-debug.log*
 Thumbs.db
 
 # Prisma
-prisma/migrations/
+packages/engine/prisma/migrations/
+
+# Build output
+.next/
+.turbo/
+.vite/
 
 # Test coverage
 coverage/

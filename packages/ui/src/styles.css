@@ -1,0 +1,147 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f5f6f8;
+  color: #111827;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: #1d4ed8;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font-family: inherit;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+input:focus,
+textarea:focus,
+select:focus,
+button:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 1px;
+}
+
+input[type='range'] {
+  accent-color: #1f2937;
+}
+
+pre {
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+/* App shell */
+.app-shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-sidebar h1 {
+  margin: 0 0 14px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-sidebar h1 .badge {
+  font-size: 9px;
+  background: #1d4ed8;
+  color: white;
+  padding: 2px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.6px;
+}
+
+.app-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-sidebar a {
+  color: #cbd5e1;
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.app-sidebar a:hover {
+  background: #1e293b;
+  color: #f8fafc;
+  text-decoration: none;
+}
+
+.app-sidebar a.active {
+  background: #1d4ed8;
+  color: white;
+}
+
+.app-main {
+  padding: 24px 32px;
+  max-width: 1280px;
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+  .app-sidebar {
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 12px;
+  }
+  .app-sidebar h1 {
+    margin: 0 12px 0 0;
+  }
+  .app-sidebar nav {
+    flex-direction: row;
+  }
+  .app-main {
+    padding: 16px;
+  }
+}

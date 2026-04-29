@@ -1,42 +1,30 @@
 {
   "name": "capitalforge",
-  "version": "1.0.0",
-  "description": "AI-powered swing trading system",
-  "main": "dist/src/index.js",
+  "version": "2.0.0",
+  "description": "AI-powered swing trading system (monorepo: engine, api, ui, shared)",
+  "private": true,
+  "packageManager": "npm@10.9.2",
+  "workspaces": [
+    "packages/shared",
+    "packages/engine",
+    "packages/api",
+    "packages/ui"
+  ],
   "scripts": {
-    "build": "tsc",
-    "docker:compose:up": "docker compose up -d",
-    "docker:compose:down": "docker compose down",
-    "docker:compose:build": "docker compose build --no-cache",
-
-    "dev": "ts-node src/index.ts",
-    "start": "node dist/src/index.js",
-    "run-cycle": "ts-node scripts/runCycle.ts",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev --url postgresql://capitalforge:capitalforge@capitalforge-db:5432/capitalforge?schema=public",
-    "prisma:studio": "prisma studio --url postgresql://capitalforge:capitalforge@capitalforge-db:5432/capitalforge?schema=public",
-    "test": "jest",
-    "test:coverage": "jest --coverage"
-  },
-  "dependencies": {
-    "@prisma/adapter-pg": "^7.3.0",
-    "@prisma/client": "^7.3.0",
-    "node-cron": "^3.0.3",
-    "openai": "^4.77.0",
-    "technicalindicators": "^3.1.0",
-    "zod": "^3.24.1"
+    "build": "turbo run build --filter=@capitalforge/*",
+    "test": "turbo run test --filter=@capitalforge/*",
+    "dev": "turbo run dev --parallel --filter=@capitalforge/*",
+    "lint": "turbo run lint --filter=@capitalforge/*",
+    "prisma:generate": "npm run prisma:generate -w @capitalforge/engine",
+    "prisma:migrate": "npm run prisma:migrate -w @capitalforge/engine",
+    "prisma:studio": "npm run prisma:studio -w @capitalforge/engine",
+    "run-cycle": "npm run run-cycle -w @capitalforge/engine",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:build": "docker compose build --no-cache"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.14",
-    "@types/node": "^22.10.7",
-    "@types/node-cron": "^3.0.11",
-    "@types/pg": "^8.16.0",
-    "dotenv": "^17.2.3",
-    "jest": "^29.7.0",
-    "prisma": "^7.3.0",
-    "ts-jest": "^29.2.5",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.7.3"
+    "turbo": "^2.3.0"
   },
   "engines": {
     "node": ">=18.0.0"
