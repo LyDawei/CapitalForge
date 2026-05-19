@@ -1,6 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAgents, usePrompts, useBasePrompts, type PromptVersion } from '../api/hooks';
+import {
+  useAgents,
+  usePrompts,
+  useBasePrompts,
+  useAbCompare,
+  type PromptVersion,
+  type AbCompare,
+  type AbGateResult,
+} from '../api/hooks';
 import { api, ApiError } from '../api/client';
 import PromptDiff from '../components/PromptDiff';
 import { dateTime } from '../lib/format';
@@ -261,6 +269,44 @@ function AgentPromptsTab() {
     return prompts?.find((p) => p.agent?.name === effectiveAgent && p.isActive);
   }, [prompts, effectiveAgent]);
 
+  const qc = useQueryClient();
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function setShadow(id: string) {
+    setBusyId(id);
+    try {
+      await api(`/api/prompts/${id}/shadow`, { method: 'POST' });
+      await qc.invalidateQueries({ queryKey: ['prompts'] });
+      await qc.invalidateQueries({ queryKey: ['ab-compare'] });
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setBusyId(null);
+  }
+  async function cancelShadow(id: string) {
+    setBusyId(id);
+    try {
+      await api(`/api/prompts/${id}/shadow`, { method: 'DELETE' });
+      await qc.invalidateQueries({ queryKey: ['prompts'] });
+      await qc.invalidateQueries({ queryKey: ['ab-compare'] });
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setBusyId(null);
+  }
+  async function promote(id: string) {
+    if (!confirm('Promote this version to active? The currently-active version will be demoted (history preserved).')) return;
+    setBusyId(id);
+    try {
+      await api(`/api/prompts/${id}/promote`, { method: 'POST' });
+      await qc.invalidateQueries({ queryKey: ['prompts'] });
+      await qc.invalidateQueries({ queryKey: ['ab-compare'] });
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setBusyId(null);
+  }
+
   return (
     <>
       <div className="card">
@@ -270,8 +316,9 @@ function AgentPromptsTab() {
             <tr>
               <th>Agent</th>
               <th>Version</th>
-              <th>Active</th>
+              <th>Status</th>
               <th>Created</th>
+              <th>Actions</th>
               <th>From</th>
               <th>To</th>
             </tr>
@@ -284,8 +331,53 @@ function AgentPromptsTab() {
                   <td>
                     <code>{p.version}</code>
                   </td>
-                  <td>{p.isActive ? <span className="badge ok">active</span> : ''}</td>
+                  <td>
+                    {p.isActive && <span className="badge ok">active</span>}
+                    {p.isShadowCandidate && !p.isActive && (
+                      <span className="badge" style={{ background: 'rgba(127,200,169,0.15)', color: 'var(--accent-2)' }}>
+                        shadow
+                      </span>
+                    )}
+                  </td>
                   <td>{dateTime(p.createdAt)}</td>
+                  <td>
+                    {!p.isActive && !p.isShadowCandidate && (
+                      <button
+                        onClick={() => setShadow(p.id)}
+                        disabled={busyId === p.id}
+                        style={btnSmallStyle('var(--accent-2)')}
+                      >
+                        Shadow
+                      </button>
+                    )}
+                    {p.isShadowCandidate && !p.isActive && (
+                      <>
+                        <button
+                          onClick={() => cancelShadow(p.id)}
+                          disabled={busyId === p.id}
+                          style={btnSmallStyle('var(--text-dim)')}
+                        >
+                          Cancel shadow
+                        </button>
+                        <button
+                          onClick={() => promote(p.id)}
+                          disabled={busyId === p.id}
+                          style={{ ...btnSmallStyle('var(--accent)'), marginLeft: 6 }}
+                        >
+                          Promote
+                        </button>
+                      </>
+                    )}
+                    {!p.isActive && !p.isShadowCandidate && (
+                      <button
+                        onClick={() => promote(p.id)}
+                        disabled={busyId === p.id}
+                        style={{ ...btnSmallStyle('var(--accent)'), marginLeft: 6 }}
+                      >
+                        Promote
+                      </button>
+                    )}
+                  </td>
                   <td>
                     <input
                       type="radio"
@@ -342,6 +434,9 @@ function AgentPromptsTab() {
           </pre>
         </div>
       )}
+
+      <AbComparePanel agentName={effectiveAgent} />
+
 
       <NewAgentPromptForm
         agents={agents ?? []}
@@ -514,6 +609,115 @@ function NewAgentPromptForm({
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// A/B compare panel — renders when the agent has a shadow candidate.
+// ---------------------------------------------------------------------------
+function AbComparePanel({ agentName }: { agentName: string }) {
+  const { data, isLoading, error } = useAbCompare(agentName || undefined);
+  if (!agentName || isLoading || error) return null;
+  if (!data || !data.candidate || !data.gates) return null;
+
+  const { active, candidate, gates } = data;
+  const verdictColor =
+    gates.verdict === 'ready' ? 'var(--accent)' : gates.verdict === 'failed' ? 'var(--danger)' : 'var(--accent-2)';
+
+  return (
+    <div className="card" style={{ borderColor: verdictColor }}>
+      <h2>
+        Shadow A/B: <code>{agentName}</code> v{active.version} vs v{candidate.version}
+      </h2>
+      <p style={{ color: 'var(--text-dim)', fontSize: 12 }}>
+        Verdict: <strong style={{ color: verdictColor, textTransform: 'uppercase' }}>{gates.verdict}</strong>.
+        The shadow candidate runs alongside the active version every cycle. Promote when all gates pass; cancel anytime.
+      </p>
+
+      <div className="grid cols-2" style={{ gap: 16 }}>
+        <SummaryColumn title={`Active v${active.version}`} s={active} color="var(--accent)" />
+        <SummaryColumn title={`Candidate v${candidate.version}`} s={candidate} color="var(--accent-2)" />
+      </div>
+
+      <h3 style={{ fontSize: 13, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginTop: 16 }}>
+        Promotion gates
+      </h3>
+      <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
+        {gates.sanity.map((g) => (
+          <GateRow key={g.name} g={g} />
+        ))}
+        <GateRow g={gates.timeFloor} />
+        <GateRow g={gates.threshold} />
+      </ul>
+    </div>
+  );
+}
+
+function SummaryColumn({
+  title,
+  s,
+  color,
+}: {
+  title: string;
+  s: AbCompare['active'];
+  color: string;
+}) {
+  return (
+    <div style={{ padding: 12, border: `1px solid ${color}`, borderRadius: 6 }}>
+      <h3 style={{ margin: 0, color }}>{title}</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8, fontSize: 13 }}>
+        <div style={{ color: 'var(--text-dim)' }}>Samples</div>
+        <div>{s.sampleSize}</div>
+        <div style={{ color: 'var(--text-dim)' }}>Schema valid</div>
+        <div>
+          {s.sampleSize > 0 ? `${((1 - s.schemaFailRate) * 100).toFixed(1)}%` : '—'}
+        </div>
+        <div style={{ color: 'var(--text-dim)' }}>Avg latency</div>
+        <div>{s.avgLatencyMs !== null ? `${s.avgLatencyMs.toFixed(0)}ms` : '—'}</div>
+        <div style={{ color: 'var(--text-dim)' }}>p95 latency</div>
+        <div>{s.p95LatencyMs !== null ? `${s.p95LatencyMs.toFixed(0)}ms` : '—'}</div>
+        {s.avgConfidence !== null && (
+          <>
+            <div style={{ color: 'var(--text-dim)' }}>Avg confidence</div>
+            <div>{s.avgConfidence.toFixed(2)}</div>
+          </>
+        )}
+        {s.avgBullishScore !== null && (
+          <>
+            <div style={{ color: 'var(--text-dim)' }}>Avg bullish</div>
+            <div>{s.avgBullishScore.toFixed(2)}</div>
+          </>
+        )}
+      </div>
+      {Object.keys(s.actionBreakdown).length > 0 && (
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-dim)' }}>
+          Actions:{' '}
+          {Object.entries(s.actionBreakdown)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(', ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GateRow({ g }: { g: AbGateResult }) {
+  const color =
+    g.status === 'pass'
+      ? 'var(--accent)'
+      : g.status === 'fail'
+        ? 'var(--danger)'
+        : g.status === 'not_available'
+          ? 'var(--text-dim)'
+          : 'var(--accent-2)';
+  return (
+    <li style={{ padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+      <span style={{ color, fontWeight: 600, textTransform: 'uppercase', fontSize: 11 }}>
+        [{g.status.replace('_', ' ')}]
+      </span>{' '}
+      <code style={{ marginLeft: 4 }}>{g.name}</code>{' '}
+      <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>— {g.detail}</span>
+    </li>
   );
 }
 

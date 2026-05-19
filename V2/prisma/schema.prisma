@@ -97,6 +97,12 @@ model PromptVersion {
   modelName   String?
   temperature Float?
   isActive    Boolean  @default(false)
+  /// Shadow A/B: when true, the cycle runner ALSO renders this version each
+  /// cycle (alongside the active one) and persists its AgentRun with
+  /// runKind='ab'. Only one candidate per agent at a time — enforced in app
+  /// code, not the DB. Shadow TradePlans are persisted but never executed;
+  /// the counterfactual settler walks them forward for hit-rate comparison.
+  isShadowCandidate Boolean @default(false)
   createdAt   DateTime @default(now())
 
   agent Agent      @relation(fields: [agentId], references: [id], onDelete: Cascade)
@@ -104,6 +110,7 @@ model PromptVersion {
 
   @@unique([agentId, version])
   @@index([agentId, createdAt])
+  @@index([isShadowCandidate])
 }
 
 // ============================================================================
