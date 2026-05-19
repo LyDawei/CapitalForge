@@ -291,3 +291,33 @@ export const useAgentPredictionScore = (agentName: string | undefined) =>
     queryFn: () => api<PredictionScore>(`/api/audit/prediction-scores/${agentName}`),
     enabled: !!agentName,
   });
+
+// ---- Wallet ----
+export type WalletTxKind = 'deposit' | 'withdrawal' | 'trade_settlement' | 'adjustment';
+export interface WalletTransaction {
+  id: string;
+  walletId: string;
+  kind: WalletTxKind;
+  amount: number;
+  reason: string;
+  author: string;
+  tradePlanId: string | null;
+  createdAt: string;
+}
+export interface WalletSummary {
+  balance: number;
+  transactionCount: number;
+  recentTransactions: WalletTransaction[];
+}
+
+export const useWallet = () =>
+  useQuery({ queryKey: ['wallet'], queryFn: () => api<WalletSummary>('/api/wallet') });
+
+export const useWalletTransactions = (limit = 50, offset = 0) =>
+  useQuery({
+    queryKey: ['wallet-transactions', limit, offset],
+    queryFn: () =>
+      api<{ transactions: WalletTransaction[]; total: number; limit: number; offset: number }>(
+        `/api/wallet/transactions?limit=${limit}&offset=${offset}`,
+      ),
+  });

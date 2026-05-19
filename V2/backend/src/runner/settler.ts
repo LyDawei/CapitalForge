@@ -1,5 +1,6 @@
 import { prisma } from '../db';
 import { getAlpacaService } from '../services/alpaca';
+import { bookTradeSettlement } from '../services/wallet';
 
 /**
  * Settles proposed TradePlans that haven't been settled yet. Walks each plan
@@ -123,6 +124,10 @@ export async function settleProposedPlans(): Promise<number> {
         heldBars,
       },
     });
+
+    // Settle the realized P&L into the wallet ledger. Idempotent on
+    // tradePlanId — re-running the settler won't double-book.
+    await bookTradeSettlement(plan.id, realizedPnl, plan.symbol, closeReason);
 
     settled++;
   }

@@ -4,6 +4,7 @@ import { computeTechnicals, type Technicals } from './technicals';
 import { runAgent, type AgentRunResult } from './agentRunner';
 import { getStrategyPreset } from '../config/presets';
 import { validateAgentOutput } from '../schemas/agent-outputs';
+import { getBalance as getWalletBalance } from '../services/wallet';
 
 // ---------------------------------------------------------------------------
 // Specialist names — must match what's seeded in the Agent table.
@@ -41,11 +42,15 @@ export interface CycleResult {
 export async function runCycle(symbol: string, date: string): Promise<CycleResult> {
   const cycleStart = Date.now();
 
-  // 1. Load live config — risk + strategy + active base prompt
-  const [riskConfig, strategyConfig, baseRow] = await Promise.all([
+  // 1. Load live config — risk + strategy + active base prompt + wallet balance.
+  //    The wallet is the single source of truth for available capital;
+  //    strategy.allocatedCapital is no longer read for sizing (it stays in
+  //    the schema as a legacy field for any tooling that still references it).
+  const [riskConfig, strategyConfig, baseRow, walletBalance] = await Promise.all([
     prisma.riskConfig.findFirst({ orderBy: { createdAt: 'desc' } }),
     prisma.strategyConfig.findFirst({ orderBy: { createdAt: 'desc' } }),
     prisma.basePromptVersion.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'desc' } }),
+    getWalletBalance(),
   ]);
   const risk = riskConfig ?? (await prisma.riskConfig.create({ data: { reason: 'auto-created by runner' } }));
   const strategy =
@@ -108,8 +113,8 @@ export async function runCycle(symbol: string, date: string): Promise<CycleResul
     //    itself. Shadow run is persisted only as an AgentRun — no Deliberation
     //    or TradePlan (cycleId is @unique on both; full TradePlan-level
     //    settlement for shadow head trader is a follow-up).
-    const headTraderResult = await runHeadTrader(cycle.id, tech, specialistResults, agentMap, strategy, basePrompt, 'primary');
-    await runHeadTrader(cycle.id, tech, specialistResults, agentMap, strategy, basePrompt, 'ab');
+    const headTraderResult = await runHeadTrader(cycle.id, tech, specialistResults, agentMap, strategy, walletBalance, basePrompt, 'primary');
+    await runHeadTrader(cycle.id, tech, specialistResults, agentMap, strategy, walletBalance, basePrompt, 'ab');
 
     // 6. Persist Deliberation + TradePlan
     let action: string | null = null;
@@ -139,10 +144,12 @@ export async function runCycle(symbol: string, date: string): Promise<CycleResul
         // Default stop from RiskConfig if head trader didn't provide one.
         const dir = action === 'SELL' ? -1 : 1;
         const stop = ht.stop ?? +(entry - dir * entry * risk.defaultStopLossPct).toFixed(2);
-        // Apply riskTolerancePct multiplier + hard cap from RiskConfig
+        // Apply riskTolerancePct multiplier + hard cap from RiskConfig.
+        // Risk dollars are sized against the wallet balance — NOT the legacy
+        // strategy.allocatedCapital, which is no longer the source of truth.
         const rawRisk = (ht.riskPctOfEquity ?? risk.maxRiskPctPerTrade) * risk.riskTolerancePct;
         const riskPct = Math.min(rawRisk, risk.maxRiskPctPerTrade);
-        const riskDollars = strategy.allocatedCapital * riskPct;
+        const riskDollars = walletBalance * riskPct;
         const shares = stop > 0 ? Math.floor(riskDollars / Math.abs(entry - stop)) : 0;
 
         // Default targets from RiskConfig if head trader didn't provide them.
@@ -306,6 +313,7 @@ async function runHeadTrader(
   specialistResults: (SpecialistRunResult | null)[],
   agentMap: Map<string, any>,
   strategy: { strategyBias: string; holdingPeriod: string; avoidEarnings: boolean; avoidEarningsWindowDays: number; allocatedCapital: number },
+  walletBalance: number,
   basePrompt: { id: string; template: string } | undefined,
   variant: 'primary' | 'ab',
 ): Promise<AgentRunResult | null> {
@@ -328,7 +336,10 @@ async function runHeadTrader(
     ? `\n--- STRATEGY DIRECTIVE ---\n${biasPreset.promptDirective}\nHolding period preference: ${strategy.holdingPeriod}.${strategy.avoidEarnings ? ` Force HOLD if earnings within ${strategy.avoidEarningsWindowDays} days.` : ''}`
     : '';
 
-  const fullPrompt = `${renderFullTemplate(pv)}${strategyBlock}\n\n--- SPECIALIST OUTPUTS ---\n${specialistSummary}\n\n--- TECHNICALS ---\n${JSON.stringify(tech, null, 2)}\n\n--- SANDBOX ---\n{ "allocatedCapital": ${strategy.allocatedCapital}, "currentEquity": ${strategy.allocatedCapital}, "cashBalance": ${strategy.allocatedCapital}, "drawdownPct": 0 }`;
+  // SANDBOX block is the head trader's sizing context. Wallet balance is the
+  // single source of truth — operators deposit/withdraw via the wallet ledger,
+  // and the settler auto-books trade outcomes back into it.
+  const fullPrompt = `${renderFullTemplate(pv)}${strategyBlock}\n\n--- SPECIALIST OUTPUTS ---\n${specialistSummary}\n\n--- TECHNICALS ---\n${JSON.stringify(tech, null, 2)}\n\n--- SANDBOX ---\n{ "walletBalance": ${walletBalance}, "currentEquity": ${walletBalance}, "cashBalance": ${walletBalance}, "drawdownPct": 0 }`;
 
   return runAgent({
     agentId: agent.id,

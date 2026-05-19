@@ -498,7 +498,63 @@ model AgentNote {
 }
 
 // ============================================================================
-// SandboxState & RiskConfig — wallet ledger + tunable knobs (mirrors V1).
+// Wallet — persistent shared capital ledger.
+//
+// Replaces the snapshot-y `StrategyConfig.allocatedCapital` for sizing
+// purposes. Balance is computed as SUM(amount) over WalletTransaction rows;
+// no denormalized balance column = no drift. Deposits/withdrawals are
+// explicit operator actions with `author` + `reason` (audit trail).
+// trade_settlement rows are auto-booked by the settler when a TradeOutcome
+// closes, so realized P&L flows into the wallet without manual reconciliation.
+// ============================================================================
+
+model Wallet {
+  id           String              @id @default(uuid())
+  /// Stable display name. The default seed is "primary"; future multi-wallet
+  /// flows can add more rows with distinct names without schema changes.
+  name         String              @unique
+  /// Operator-friendly description shown in the UI.
+  description  String?
+  createdAt    DateTime            @default(now())
+
+  transactions WalletTransaction[]
+}
+
+enum WalletTxKind {
+  deposit
+  withdrawal
+  trade_settlement
+  adjustment
+}
+
+model WalletTransaction {
+  id          String       @id @default(uuid())
+  walletId    String
+  kind        WalletTxKind
+  /// Signed dollars: +ve for deposits and winning settlements, -ve for
+  /// withdrawals and losing settlements. Balance = SUM(amount).
+  amount      Float
+  /// Required for operator actions; auto-filled by the settler.
+  reason      String
+  /// Operator identity for deposit/withdrawal/adjustment. "settler" for
+  /// auto-booked trade settlements.
+  author      String
+  /// Set when kind=trade_settlement, points to the closing TradePlan so the
+  /// UI can navigate from ledger entry to plan + outcome.
+  tradePlanId String?
+  createdAt   DateTime     @default(now())
+
+  wallet      Wallet       @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  /// Idempotency: re-running the settler must not double-book a settlement.
+  /// One settlement per closing TradePlan.
+  @@unique([tradePlanId])
+  @@index([walletId, createdAt])
+  @@index([kind])
+}
+
+// ============================================================================
+// SandboxState & RiskConfig — per-cycle sandbox + tunable knobs (mirrors V1).
 // ============================================================================
 
 model SandboxState {

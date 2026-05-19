@@ -6,7 +6,60 @@ cold; don't delete items when done — strike them through and move them to a
 
 ---
 
-## 1. Enforce a JSON output contract on every prompt
+## 4. ~~Persistent shared wallet with audit trail~~ ✅ shipped 2026-05-19
+
+**Problem.** `SandboxState` is point-in-time and `StrategyConfig.allocatedCapital`
+is a snapshot — changing the allocation from $300 to $350 in the Settings UI
+overwrites the figure instead of recording a $50 deposit. We have no notion
+of "the agents have spent $50; the wallet should now be $250; if I top it up
+by $50 the wallet becomes $300, not $350." There's also no audit trail for
+who added or withdrew money and when.
+
+**What we want.** A persistent wallet ledger separate from any per-cycle
+sandbox state:
+
+- A `Wallet` row that is the single source of truth for available capital.
+- A `WalletTransaction` ledger: every deposit (operator top-up) and every
+  withdrawal (trade cost / realized loss / explicit drawdown) is appended.
+  Current balance = `SUM(transactions.amount)`.
+- The Settings UI exposes "deposit $X" and "withdraw $X" actions with a
+  required `reason` and `author` field, NOT an "edit allocated capital"
+  field. Deposits add; they never overwrite.
+- Per-cycle accounting reads the wallet balance at cycle start and writes
+  back any realized P&L as a settlement transaction at outcome close. This
+  also means realized losses from `TradeOutcome` flow into the wallet
+  ledger automatically.
+- Audit endpoints + UI:
+  - `GET /api/wallet` — current balance + recent transactions
+  - `GET /api/wallet/transactions` — full paginated ledger
+  - `POST /api/wallet/transactions` — operator deposit/withdrawal (gated)
+  - UI wallet page: balance + chronological ledger + deposit/withdraw form
+
+**Why it matters.** Today there's no way to honestly answer "how much
+money have these agents lost so far?" without manually subtracting current
+equity from the most recent allocation. And there's no defense against
+fat-fingering the Settings → allocatedCapital field and accidentally
+erasing $300 of trading history.
+
+**Open questions.**
+- Is the wallet single-currency (USD only) for V2, or do we want to model
+  multi-asset balances now? Likely USD-only for V2; multi-asset is a real
+  trading concern but isn't part of the audit story.
+- Reconciliation: should the wallet auto-sync from `TradeOutcome.realizedPnl`
+  when a plan settles, or only at explicit operator action? Auto-sync is
+  more accurate; manual is safer until the runner is armed.
+- Does `StrategyConfig.allocatedCapital` go away entirely once the wallet
+  exists, or does it stay as a "max position-sizing notional" knob distinct
+  from actual cash? Probably the latter, but worth deciding before code.
+
+**Effort.** ~1 day: schema (Wallet + WalletTransaction tables), service
+layer (`getCurrentBalance`, `recordTransaction`), 3 routes, Settings UI
+deposit/withdraw form + ledger page, integration with settler so realized
+P&L books a transaction.
+
+---
+
+## 1. ~~Enforce a JSON output contract on every prompt~~ ✅ shipped 2026-05-18
 
 **Problem.** A prompt and the validator that parses its output are two halves of
 an implicit contract that live in different places. A single typo in a prompt
@@ -85,7 +138,7 @@ adapters are wired.
 
 ---
 
-## 2. A/B test prompt versions before rollout
+## 2. ~~A/B test prompt versions before rollout~~ ✅ MVP shipped 2026-05-19
 
 **Problem.** Today, when we activate a new prompt version (`upgrade-prompt.ts <agent> <version>`),
 it becomes the live prompt for every subsequent cycle. We have no way to know
@@ -224,7 +277,7 @@ victory either way. Move on; there are better prompt ideas to try.
 
 ---
 
-## 3. Implement the real Alpaca adapter
+## 3. ~~Implement the real Alpaca adapter~~ ✅ Phase A shipped 2026-05-19 (Phase B deferred)
 
 **Problem.** V2 is currently 100% mock for Alpaca, even when `MODE=paper` and a
 real API key is set. The factory in `V2/backend/src/services/alpaca.ts` falls
@@ -324,4 +377,84 @@ of the work.
 
 ## Done
 
-(empty — strike-through completed items here when finished, with date)
+### #4 — Persistent shared wallet with audit trail — 2026-05-19
+`Wallet` (singleton) + `WalletTransaction` (append-only ledger) tables.
+Balance = SUM(amount) over the wallet's transactions — no denormalized
+balance column, so the books can never disagree with the ledger.
+
+Write paths:
+- **Operator** — `POST /api/wallet/transactions` with `{ kind, amount, reason, author }`.
+  Deposits add; withdrawals subtract; adjustments are signed. Sign + required-fields
+  validation in the service layer; UI form on `/wallet` enforces a positive magnitude
+  and flips the sign for withdrawals client-side.
+- **Settler** — when `TradeOutcome` is created, `bookTradeSettlement(tradePlanId, realizedPnl, …)`
+  records a `trade_settlement` row tagged `author='settler'`. `tradePlanId` is unique on
+  `WalletTransaction` so re-running the settler is idempotent (the P2002 violation is
+  caught and silently no-oped).
+
+Read path:
+- `GET /api/wallet` — balance + the 10 most recent transactions.
+- `GET /api/wallet/transactions` — paginated full ledger.
+- Cycle runner reads the balance once at cycle start and threads it into the head
+  trader's SANDBOX prompt block (`"walletBalance": <n>`). `strategy.allocatedCapital`
+  is no longer read for sizing.
+
+UI: new `/wallet` route + sidebar entry. Balance card (green when positive, red when
+negative), deposit/withdraw/adjustment form with required reason + author fields, and
+a ledger table colored by sign with badges per kind. `trade_settlement` rows link back
+to their TradePlan.
+
+9 jest tests cover sign validation, required-field validation, additive top-up
+(deposit $300 then $50 = $350, not $50), newest-first listing, and settler
+idempotency.
+
+### #1 — Enforce a JSON output contract on every prompt — 2026-05-18
+Phase 1 + Phase 2 shipped. `PromptVersion.template` split into
+`directiveTemplate` (user-editable) + `outputContract` (locked, auto-derived
+from the agent's Zod schema in `backend/src/schemas/agent-outputs.ts`).
+`POST /api/prompts` and `POST /api/base-prompts` gate saves behind a
+preview-before-save check (render through smart mock, validate against the
+schema, 400 with `parseError`/`renderedPrompt`/`rawResponse` on failure,
+`?force=true` overrides). 45 new tests in `agent-outputs.test.ts`. Phase 3
+(LLM-API-level JSON schema enforcement) lands naturally once real
+OpenAI/Anthropic adapters ship.
+
+### #2 — A/B test prompt versions before rollout (MVP) — 2026-05-19
+Shadow-run infrastructure live:
+- `PromptVersion.isShadowCandidate` flag; cycle runner dual-runs primary +
+  candidate every cycle. Candidate AgentRuns carry `runKind='ab'`; primary
+  chain unchanged (specialists feed head trader, etc.).
+- Endpoints: `POST/DELETE /api/prompts/:id/shadow`, `POST /api/prompts/:id/promote`,
+  `GET /api/prompts/ab-compare/:agentName`.
+- UI: Shadow/Cancel-shadow/Promote buttons per version in the Prompts page;
+  Compare panel showing per-version metrics (sample size, schema validity,
+  latency p50/p95, avg confidence, action breakdown) + the three promotion
+  gates (sanity / time-floor / sample threshold).
+
+**Carved out as follow-up:** TradePlan-level outcome comparison for shadow
+head trader. Currently `TradePlan.cycleId` is `@unique` so we can't persist
+a second TradePlan per cycle; shadow head trader writes only an AgentRun
+(parsedOutput holds the full plan). Walking shadow plans through the settler
+to populate `realizedPnl`/`rMultiple` needs the unique-constraint relaxation
+plus a refactor across 8+ files (cycles route, critiques, runs, trades,
+audit modules calibration/drift/influence/predictionScore, frontend hooks).
+That's the next iteration of #2 if real prompt iteration starts demanding it.
+
+### #3 — Real Alpaca data adapter (Phase A) — 2026-05-19
+`backend/src/services/alpaca.real.ts`:
+- `getDailyBars` / `getBarsAfter` against `data.alpaca.markets/v2/stocks/{symbol}/bars`
+  with `next_page_token` pagination and the most-recent-N-bars trim.
+- `getCurrentPrice` — latest trade with fallback to most recent daily bar
+  when the trades endpoint errs.
+- In-process token-bucket rate limiter (180/min default via `ALPACA_RATE_LIMIT_PER_MIN`).
+- 401 fails loud immediately; 429 backs off exponentially up to 5 attempts;
+  5xx retries up to 3.
+- Bars normalized to V2's `DailyBar` shape (`date: YYYY-MM-DD`).
+- Factory in `services/alpaca.ts` returns Real when `MODE=paper && ALPACA_API_KEY && ALPACA_API_SECRET`, else mock.
+- 12 unit tests with `fetch` mocked covering headers, query params, pagination,
+  trim-to-limit, 401/429/5xx paths, trade-then-bar fallback.
+
+**Phase B (order execution) intentionally deferred** per the safety guidance
+in the original TODO. When V2 arms, copy `submitOrder` / `getOrder` from
+`packages/engine/src/services/alpaca.ts` behind a `RUNNER_DRY_RUN=true`
+default gate — that's the line between audit infra and live trading.
