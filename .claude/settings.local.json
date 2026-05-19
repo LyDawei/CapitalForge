@@ -18,7 +18,15 @@
       "WebSearch",
       "Bash(git -C C:/Users/David.Ly/repos/CapitalForge log --oneline -20)",
       "Bash(git -C C:/Users/David.Ly/repos/CapitalForge ls-files dashboard)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(node *)",
+      "Bash(npx prisma *)",
+      "PowerShell(npx --prefix V2/backend prisma generate --config V2/backend/prisma.config.ts 2>&1 | Select-Object -Last 25)",
+      "Bash(npx jest *)",
+      "Bash(npx tsx *)",
+      "Bash(git restore *)",
+      "Bash(git add *)"
     ]
   }
 }
