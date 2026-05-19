@@ -62,11 +62,26 @@ function generateBars(symbol: string, fromDate: Date, count: number): Promise<Da
 let _instance: AlpacaService | null = null;
 export function getAlpacaService(): AlpacaService {
   if (_instance) return _instance;
-  if (env.MODE === 'mock' || !env.ALPACA_API_KEY) {
+  if (env.MODE === 'mock' || !env.ALPACA_API_KEY || !env.ALPACA_API_SECRET) {
     _instance = new MockAlpacaService();
   } else {
-    // Real adapter goes in services/alpaca.real.ts when we're ready.
-    _instance = new MockAlpacaService();
+    // Real adapter activates only when both MODE=paper AND credentials are
+    // present. Missing creds silently fall back to mock so the dev loop never
+    // crashes — but a misconfigured prod environment will see only mock data,
+    // which is by design (loud failure on bad creds happens at first request).
+    const { RealAlpacaService } = require('./alpaca.real') as typeof import('./alpaca.real');
+    _instance = new RealAlpacaService({
+      apiKey: env.ALPACA_API_KEY,
+      apiSecret: env.ALPACA_API_SECRET,
+      dataBaseUrl: env.ALPACA_DATA_URL,
+      feed: env.ALPACA_DATA_FEED,
+      rateLimitPerMin: env.ALPACA_RATE_LIMIT_PER_MIN,
+    });
   }
   return _instance;
+}
+
+/** Test hook: reset the lazy singleton so tests can swap implementations. */
+export function _resetAlpacaServiceForTests() {
+  _instance = null;
 }

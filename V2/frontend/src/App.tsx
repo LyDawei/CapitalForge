@@ -8,6 +8,7 @@ import CycleDetail from './routes/CycleDetail';
 import Prompts from './routes/Prompts';
 import Audit from './routes/Audit';
 import Trades from './routes/Trades';
+import Wallet from './routes/Wallet';
 import Settings from './routes/Settings';
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="cycles/:id" element={<CycleDetail />} />
         <Route path="prompts" element={<Prompts />} />
         <Route path="trades" element={<Trades />} />
+        <Route path="wallet" element={<Wallet />} />
         <Route path="audit" element={<Audit />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

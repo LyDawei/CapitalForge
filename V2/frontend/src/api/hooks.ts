@@ -131,6 +131,7 @@ export interface PromptVersion {
   outputContract: string;
   changelog: string | null;
   isActive: boolean;
+  isShadowCandidate: boolean;
   createdAt: string;
   agent?: { name: string; displayName: string };
 }
@@ -139,6 +140,45 @@ export const usePrompts = (agentName?: string) =>
   useQuery({
     queryKey: ['prompts', agentName],
     queryFn: () => api<PromptVersion[]>(`/api/prompts${agentName ? `?agentName=${agentName}` : ''}`),
+  });
+
+export interface AbGateResult {
+  name: string;
+  status: 'pass' | 'fail' | 'pending' | 'not_available';
+  detail: string;
+}
+export interface AbVersionSummary {
+  promptVersionId: string;
+  version: string;
+  sampleSize: number;
+  schemaValid: number;
+  schemaFailRate: number;
+  avgLatencyMs: number | null;
+  p95LatencyMs: number | null;
+  avgConfidence: number | null;
+  avgBullishScore: number | null;
+  actionBreakdown: Record<string, number>;
+  firstRunAt: string | null;
+  lastRunAt: string | null;
+}
+export interface AbCompare {
+  agentName: string;
+  agentKind: string;
+  active: AbVersionSummary;
+  candidate: AbVersionSummary | null;
+  gates: {
+    sanity: AbGateResult[];
+    timeFloor: AbGateResult;
+    threshold: AbGateResult;
+    verdict: 'ready' | 'pending' | 'failed';
+  } | null;
+}
+
+export const useAbCompare = (agentName: string | undefined) =>
+  useQuery({
+    queryKey: ['ab-compare', agentName],
+    queryFn: () => api<AbCompare>(`/api/prompts/ab-compare/${agentName}`),
+    enabled: !!agentName,
   });
 
 export const useTrades = (limit = 50) =>
@@ -250,4 +290,34 @@ export const useAgentPredictionScore = (agentName: string | undefined) =>
     queryKey: ['prediction-score', agentName],
     queryFn: () => api<PredictionScore>(`/api/audit/prediction-scores/${agentName}`),
     enabled: !!agentName,
+  });
+
+// ---- Wallet ----
+export type WalletTxKind = 'deposit' | 'withdrawal' | 'trade_settlement' | 'adjustment';
+export interface WalletTransaction {
+  id: string;
+  walletId: string;
+  kind: WalletTxKind;
+  amount: number;
+  reason: string;
+  author: string;
+  tradePlanId: string | null;
+  createdAt: string;
+}
+export interface WalletSummary {
+  balance: number;
+  transactionCount: number;
+  recentTransactions: WalletTransaction[];
+}
+
+export const useWallet = () =>
+  useQuery({ queryKey: ['wallet'], queryFn: () => api<WalletSummary>('/api/wallet') });
+
+export const useWalletTransactions = (limit = 50, offset = 0) =>
+  useQuery({
+    queryKey: ['wallet-transactions', limit, offset],
+    queryFn: () =>
+      api<{ transactions: WalletTransaction[]; total: number; limit: number; offset: number }>(
+        `/api/wallet/transactions?limit=${limit}&offset=${offset}`,
+      ),
   });

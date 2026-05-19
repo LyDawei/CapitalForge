@@ -4,6 +4,7 @@ import { computeTechnicals, type Technicals } from './technicals';
 import { runAgent, type AgentRunResult } from './agentRunner';
 import { getStrategyPreset } from '../config/presets';
 import { validateAgentOutput } from '../schemas/agent-outputs';
+import { getBalance as getWalletBalance } from '../services/wallet';
 
 // ---------------------------------------------------------------------------
 // Specialist names — must match what's seeded in the Agent table.
@@ -41,11 +42,15 @@ export interface CycleResult {
 export async function runCycle(symbol: string, date: string): Promise<CycleResult> {
   const cycleStart = Date.now();
 
-  // 1. Load live config — risk + strategy + active base prompt
-  const [riskConfig, strategyConfig, baseRow] = await Promise.all([
+  // 1. Load live config — risk + strategy + active base prompt + wallet balance.
+  //    The wallet is the single source of truth for available capital;
+  //    strategy.allocatedCapital is no longer read for sizing (it stays in
+  //    the schema as a legacy field for any tooling that still references it).
+  const [riskConfig, strategyConfig, baseRow, walletBalance] = await Promise.all([
     prisma.riskConfig.findFirst({ orderBy: { createdAt: 'desc' } }),
     prisma.strategyConfig.findFirst({ orderBy: { createdAt: 'desc' } }),
     prisma.basePromptVersion.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'desc' } }),
+    getWalletBalance(),
   ]);
   const risk = riskConfig ?? (await prisma.riskConfig.create({ data: { reason: 'auto-created by runner' } }));
   const strategy =
@@ -68,38 +73,48 @@ export async function runCycle(symbol: string, date: string): Promise<CycleResul
   });
 
   try {
-    // 4. Load all agent rows + their active prompt versions (cached for this cycle)
+    // 4. Load all agent rows + their active prompt versions, plus any
+    //    shadow A/B candidates. Shadow candidates are run alongside the
+    //    primary but their outputs do NOT feed downstream (head trader still
+    //    only sees primary specialist outputs).
     const agents = await prisma.agent.findMany({
       where: { isActive: true },
-      include: { promptVersions: { where: { isActive: true }, take: 1 } },
+      include: {
+        promptVersions: {
+          where: { OR: [{ isActive: true }, { isShadowCandidate: true }] },
+        },
+      },
     });
     const agentMap = new Map(agents.map((a) => [a.name, a]));
 
-    // 5. Run all 8 specialists in parallel
+    // 5. Run all 8 specialists in parallel — primary chain feeds downstream.
     const specialistResults = await Promise.all(
-      SPECIALIST_NAMES.map((name) => runSpecialist(name, cycle.id, tech, agentMap, basePrompt)),
+      SPECIALIST_NAMES.map((name) => runSpecialist(name, cycle.id, tech, agentMap, basePrompt, 'primary')),
     );
 
-    // Persist SpecialistAnalysis rows
+    // 5b. Persist primary SpecialistAnalysis rows.
     for (const sr of specialistResults) {
       if (!sr) continue;
-      await prisma.specialistAnalysis.create({
-        data: {
-          cycleId: cycle.id,
-          agentRunId: sr.agentRunId,
-          agentName: sr.agentName,
-          bullishScore: sr.parsed?.bullishScore ?? 0,
-          confidence: sr.parsed?.confidence ?? 0,
-          rationale: sr.parsed?.rationale ?? [],
-          flags: sr.parsed?.flags ?? [],
-          keyLevels: sr.parsed?.keyLevels ?? null,
-          extras: sr.parsed?.extras ?? null,
-        },
-      });
+      await persistSpecialistAnalysis(cycle.id, sr);
     }
 
-    // 6. Run head trader — strategy bias injected into prompt
-    const headTraderResult = await runHeadTrader(cycle.id, tech, specialistResults, agentMap, strategy, basePrompt);
+    // 5c. Shadow specialist runs — fire-and-forget, persisted with runKind='ab'.
+    //     These don't feed the head trader; they exist purely for A/B audit.
+    await Promise.all(
+      SPECIALIST_NAMES.map(async (name) => {
+        const sr = await runSpecialist(name, cycle.id, tech, agentMap, basePrompt, 'ab');
+        if (sr) await persistSpecialistAnalysis(cycle.id, sr);
+      }),
+    );
+
+    // 6. Run head trader — strategy bias injected into prompt. Shadow head
+    //    trader (if any) runs in parallel; it gets the SAME primary specialist
+    //    inputs so the only variable being tested is the head trader prompt
+    //    itself. Shadow run is persisted only as an AgentRun — no Deliberation
+    //    or TradePlan (cycleId is @unique on both; full TradePlan-level
+    //    settlement for shadow head trader is a follow-up).
+    const headTraderResult = await runHeadTrader(cycle.id, tech, specialistResults, agentMap, strategy, walletBalance, basePrompt, 'primary');
+    await runHeadTrader(cycle.id, tech, specialistResults, agentMap, strategy, walletBalance, basePrompt, 'ab');
 
     // 6. Persist Deliberation + TradePlan
     let action: string | null = null;
@@ -129,10 +144,12 @@ export async function runCycle(symbol: string, date: string): Promise<CycleResul
         // Default stop from RiskConfig if head trader didn't provide one.
         const dir = action === 'SELL' ? -1 : 1;
         const stop = ht.stop ?? +(entry - dir * entry * risk.defaultStopLossPct).toFixed(2);
-        // Apply riskTolerancePct multiplier + hard cap from RiskConfig
+        // Apply riskTolerancePct multiplier + hard cap from RiskConfig.
+        // Risk dollars are sized against the wallet balance — NOT the legacy
+        // strategy.allocatedCapital, which is no longer the source of truth.
         const rawRisk = (ht.riskPctOfEquity ?? risk.maxRiskPctPerTrade) * risk.riskTolerancePct;
         const riskPct = Math.min(rawRisk, risk.maxRiskPctPerTrade);
-        const riskDollars = strategy.allocatedCapital * riskPct;
+        const riskDollars = walletBalance * riskPct;
         const shares = stop > 0 ? Math.floor(riskDollars / Math.abs(entry - stop)) : 0;
 
         // Default targets from RiskConfig if head trader didn't provide them.
@@ -169,10 +186,14 @@ export async function runCycle(symbol: string, date: string): Promise<CycleResul
       }
     }
 
-    // 7. Run audit agents (risk auditor + devil's advocate) — in parallel
+    // 7. Run audit agents (risk auditor + devil's advocate) — in parallel.
+    //    Shadow audit agents run alongside primary; both persist Critiques
+    //    (Critique has no cycleId uniqueness constraint, only agentRunId).
     await Promise.all([
-      runAuditAgent('riskAuditor', cycle.id, tech, headTraderResult, specialistResults, agentMap, basePrompt),
-      runAuditAgent('devilsAdvocate', cycle.id, tech, headTraderResult, specialistResults, agentMap, basePrompt),
+      runAuditAgent('riskAuditor', cycle.id, tech, headTraderResult, specialistResults, agentMap, basePrompt, 'primary'),
+      runAuditAgent('devilsAdvocate', cycle.id, tech, headTraderResult, specialistResults, agentMap, basePrompt, 'primary'),
+      runAuditAgent('riskAuditor', cycle.id, tech, headTraderResult, specialistResults, agentMap, basePrompt, 'ab'),
+      runAuditAgent('devilsAdvocate', cycle.id, tech, headTraderResult, specialistResults, agentMap, basePrompt, 'ab'),
     ]);
 
     // 8. Mark cycle complete
@@ -227,16 +248,29 @@ interface SpecialistRunResult extends AgentRunResult {
   agentName: string;
 }
 
+/**
+ * Picks the prompt version for the requested variant. Returns null if no
+ * matching version exists — e.g., the variant='ab' lookup returns null when
+ * the agent has no shadow candidate, in which case the caller should skip.
+ */
+function pickPromptVersion(agent: any, variant: 'primary' | 'ab'): any | null {
+  if (variant === 'primary') return agent?.promptVersions?.find((p: any) => p.isActive) ?? null;
+  // Shadow candidate is the one flagged but NOT also active (defense against
+  // someone marking the active version as a candidate, which is a no-op).
+  return agent?.promptVersions?.find((p: any) => p.isShadowCandidate && !p.isActive) ?? null;
+}
+
 async function runSpecialist(
   name: string,
   cycleId: string,
   tech: Technicals,
   agentMap: Map<string, any>,
-  basePrompt?: { id: string; template: string },
+  basePrompt: { id: string; template: string } | undefined,
+  variant: 'primary' | 'ab',
 ): Promise<SpecialistRunResult | null> {
   const agent = agentMap.get(name);
-  if (!agent || !agent.promptVersions?.[0]) return null;
-  const pv = agent.promptVersions[0];
+  const pv = pickPromptVersion(agent, variant);
+  if (!agent || !pv) return null;
 
   const renderedPrompt = renderTemplate(renderFullTemplate(pv), tech);
 
@@ -248,9 +282,26 @@ async function runSpecialist(
     renderedPrompt,
     inputPayload: { technicals: tech },
     validate: (raw) => validateAgentOutput(name, raw),
+    runKind: variant,
   });
 
   return { ...result, agentName: name };
+}
+
+async function persistSpecialistAnalysis(cycleId: string, sr: SpecialistRunResult) {
+  await prisma.specialistAnalysis.create({
+    data: {
+      cycleId,
+      agentRunId: sr.agentRunId,
+      agentName: sr.agentName,
+      bullishScore: sr.parsed?.bullishScore ?? 0,
+      confidence: sr.parsed?.confidence ?? 0,
+      rationale: sr.parsed?.rationale ?? [],
+      flags: sr.parsed?.flags ?? [],
+      keyLevels: sr.parsed?.keyLevels ?? null,
+      extras: sr.parsed?.extras ?? null,
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -262,11 +313,13 @@ async function runHeadTrader(
   specialistResults: (SpecialistRunResult | null)[],
   agentMap: Map<string, any>,
   strategy: { strategyBias: string; holdingPeriod: string; avoidEarnings: boolean; avoidEarningsWindowDays: number; allocatedCapital: number },
-  basePrompt?: { id: string; template: string },
+  walletBalance: number,
+  basePrompt: { id: string; template: string } | undefined,
+  variant: 'primary' | 'ab',
 ): Promise<AgentRunResult | null> {
   const agent = agentMap.get('headTrader');
-  if (!agent || !agent.promptVersions?.[0]) return null;
-  const pv = agent.promptVersions[0];
+  const pv = pickPromptVersion(agent, variant);
+  if (!agent || !pv) return null;
 
   // Build specialist summary block
   const specialistSummary = specialistResults
@@ -283,7 +336,10 @@ async function runHeadTrader(
     ? `\n--- STRATEGY DIRECTIVE ---\n${biasPreset.promptDirective}\nHolding period preference: ${strategy.holdingPeriod}.${strategy.avoidEarnings ? ` Force HOLD if earnings within ${strategy.avoidEarningsWindowDays} days.` : ''}`
     : '';
 
-  const fullPrompt = `${renderFullTemplate(pv)}${strategyBlock}\n\n--- SPECIALIST OUTPUTS ---\n${specialistSummary}\n\n--- TECHNICALS ---\n${JSON.stringify(tech, null, 2)}\n\n--- SANDBOX ---\n{ "allocatedCapital": ${strategy.allocatedCapital}, "currentEquity": ${strategy.allocatedCapital}, "cashBalance": ${strategy.allocatedCapital}, "drawdownPct": 0 }`;
+  // SANDBOX block is the head trader's sizing context. Wallet balance is the
+  // single source of truth — operators deposit/withdraw via the wallet ledger,
+  // and the settler auto-books trade outcomes back into it.
+  const fullPrompt = `${renderFullTemplate(pv)}${strategyBlock}\n\n--- SPECIALIST OUTPUTS ---\n${specialistSummary}\n\n--- TECHNICALS ---\n${JSON.stringify(tech, null, 2)}\n\n--- SANDBOX ---\n{ "walletBalance": ${walletBalance}, "currentEquity": ${walletBalance}, "cashBalance": ${walletBalance}, "drawdownPct": 0 }`;
 
   return runAgent({
     agentId: agent.id,
@@ -296,6 +352,7 @@ async function runHeadTrader(
       specialists: specialistResults.filter(Boolean).map((s) => ({ name: s!.agentName, parsed: s!.parsed })),
     },
     validate: (raw) => validateAgentOutput('headTrader', raw),
+    runKind: variant,
   });
 }
 
@@ -309,11 +366,12 @@ async function runAuditAgent(
   headTraderResult: AgentRunResult | null,
   specialistResults: (SpecialistRunResult | null)[],
   agentMap: Map<string, any>,
-  basePrompt?: { id: string; template: string },
+  basePrompt: { id: string; template: string } | undefined,
+  variant: 'primary' | 'ab',
 ): Promise<AgentRunResult | null> {
   const agent = agentMap.get(name);
-  if (!agent || !agent.promptVersions?.[0]) return null;
-  const pv = agent.promptVersions[0];
+  const pv = pickPromptVersion(agent, variant);
+  if (!agent || !pv) return null;
 
   const htSummary = headTraderResult?.parsed
     ? JSON.stringify(headTraderResult.parsed, null, 2)
@@ -329,6 +387,7 @@ async function runAuditAgent(
     renderedPrompt: fullPrompt,
     inputPayload: { headTraderPlan: headTraderResult?.parsed, technicals: tech },
     validate: (raw) => validateAgentOutput(name, raw),
+    runKind: variant,
   });
 
   // If this is a riskAuditor or devilsAdvocate with extras, persist as Critique
