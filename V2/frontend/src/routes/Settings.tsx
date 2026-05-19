@@ -401,7 +401,7 @@ function Knob({ label, help, value, min, max, step, unit, multiplier, integer, o
         type="range"
         min={min} max={max} step={step}
         value={display}
-        onChange={(e) => onChange(multiplier ? +e.target.value / multiplier : +e.target.value)}
+        onChange={(e) => onChange(+e.target.value)}
         style={{ width: '100%', marginTop: 6 }}
       />
       <p style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4 }}>{help}</p>
