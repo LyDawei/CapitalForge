@@ -3,9 +3,10 @@
  * formats it as a prompt context block, and tracks the FeedFetch IDs so the
  * runner can record consumption rows after the agent has run.
  *
- * Two agents have feed dependencies today:
- *   - newsEvents     → Alpaca news, Finnhub company news, Finnhub earnings
- *   - macroContext   → Alpaca SPY/QQQ + sector ETFs, FRED 10Y / VIX / dollar
+ * Three agents have feed dependencies today:
+ *   - newsEvents         → Alpaca news, Finnhub company news, Finnhub earnings
+ *   - macroContext       → Alpaca SPY/QQQ + sector ETFs, FRED 10Y / VIX / dollar
+ *   - liquiditySlippage  → Alpaca latest quote (NBBO) + asset info (shortable, etc.)
  *
  * Every fetch goes through `fetchWithAudit` so the FeedFetch table has a
  * row per pull, every time. The agents themselves never call services
@@ -220,6 +221,60 @@ export async function fetchMacroContextBundle(): Promise<FeedBundle> {
     contextBlock: sections.length
       ? `--- MACRO CONTEXT FEEDS ---\n${sections.join('\n\n')}`
       : `--- MACRO CONTEXT FEEDS ---\n(no data — operating in no-feed mode)`,
+    feedFetchIds: ids,
+  };
+}
+
+// ===========================================================================
+// liquiditySlippage
+// ===========================================================================
+export async function fetchLiquidityBundle(symbol: string): Promise<FeedBundle> {
+  const alpaca = getAlpacaService();
+  const ids: string[] = [];
+
+  const [quote, asset] = await Promise.all([
+    alpaca.getLatestQuote(symbol),
+    alpaca.getAssetInfo(symbol),
+  ]);
+  ids.push(quote.feedFetchId, asset.feedFetchId);
+
+  const sections: string[] = [];
+
+  if (quote.data) {
+    const q = quote.data;
+    const dollarDepthBid = q.bid * q.bidSize;
+    const dollarDepthAsk = q.ask * q.askSize;
+    sections.push(
+      `NBBO quote:\n` +
+        `  bid=${q.bid}  ask=${q.ask}  mid=${q.midPrice}\n` +
+        `  spreadAbs=$${q.spreadAbs}  spreadBps=${q.spreadBps}\n` +
+        `  bidSize=${q.bidSize}sh ($${dollarDepthBid.toFixed(0)} at NBBO)\n` +
+        `  askSize=${q.askSize}sh ($${dollarDepthAsk.toFixed(0)} at NBBO)\n` +
+        `  quote age: ${q.quoteAgeSeconds}s (IEX free-tier delay floor ≈ 900s)`,
+    );
+  } else {
+    sections.push('NBBO quote: unavailable (feed errored)');
+  }
+
+  if (asset.data) {
+    const a = asset.data;
+    sections.push(
+      `Asset metadata:\n` +
+        `  tradable=${a.tradable}  shortable=${a.shortable}  easyToBorrow=${a.easyToBorrow}\n` +
+        `  marginable=${a.marginable}  fractionable=${a.fractionable}\n` +
+        `  status=${a.status}  class=${a.assetClass}`,
+    );
+  } else {
+    sections.push('Asset metadata: unavailable (feed errored)');
+  }
+
+  const errored = [quote, asset].filter((r) => r.errored).length;
+  if (errored > 0) sections.push(`Feed errors: ${errored} source(s) returned empty or errored.`);
+
+  return {
+    contextBlock: sections.length
+      ? `--- LIQUIDITY & SLIPPAGE FEEDS ---\n${sections.join('\n\n')}`
+      : `--- LIQUIDITY & SLIPPAGE FEEDS ---\n(no data — operating in no-feed mode)`,
     feedFetchIds: ids,
   };
 }

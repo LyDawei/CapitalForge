@@ -6,7 +6,12 @@ import { getStrategyPreset } from '../config/presets';
 import { validateAgentOutput } from '../schemas/agent-outputs';
 import { getBalance as getWalletBalance } from '../services/wallet';
 import { settleProposedPlans } from './settler';
-import { fetchNewsEventsBundle, fetchMacroContextBundle, type FeedBundle } from './agentFeeds';
+import {
+  fetchNewsEventsBundle,
+  fetchMacroContextBundle,
+  fetchLiquidityBundle,
+  type FeedBundle,
+} from './agentFeeds';
 import { recordConsumption } from '../services/feedLog';
 
 // ---------------------------------------------------------------------------
@@ -113,7 +118,7 @@ export async function runCycle(symbol: string, date: string): Promise<CycleResul
     //     the same FeedFetch rows — that's the whole point of A/B: only the
     //     prompt varies, the data doesn't.
     const feedsByAgent: Map<string, FeedBundle> = new Map();
-    const [newsBundle, macroBundle] = await Promise.all([
+    const [newsBundle, macroBundle, liquidityBundle] = await Promise.all([
       fetchNewsEventsBundle(symbol).catch((err: any) => {
         // eslint-disable-next-line no-console
         console.warn(`[cycle ${symbol}@${date}] newsEvents feeds failed: ${err.message}`);
@@ -124,9 +129,15 @@ export async function runCycle(symbol: string, date: string): Promise<CycleResul
         console.warn(`[cycle ${symbol}@${date}] macroContext feeds failed: ${err.message}`);
         return { contextBlock: '', feedFetchIds: [] };
       }),
+      fetchLiquidityBundle(symbol).catch((err: any) => {
+        // eslint-disable-next-line no-console
+        console.warn(`[cycle ${symbol}@${date}] liquiditySlippage feeds failed: ${err.message}`);
+        return { contextBlock: '', feedFetchIds: [] };
+      }),
     ]);
     feedsByAgent.set('newsEvents', newsBundle);
     feedsByAgent.set('macroContext', macroBundle);
+    feedsByAgent.set('liquiditySlippage', liquidityBundle);
 
     // 5. Run all 8 specialists in parallel — primary chain feeds downstream.
     const specialistResults = await Promise.all(
@@ -367,6 +378,14 @@ function inferInfluenceTag(agentName: string, parsed: any): string | undefined {
     if (tailwind > 0.6) return 'tailwind';
     if ((parsed.confidence ?? 0) <= 0.25) return 'no_signal';
     return 'neutral';
+  }
+  if (agentName === 'liquiditySlippage') {
+    if (parsed.extras?.tradable === false) return 'not_tradable';
+    const slippage = parsed.extras?.estimatedSlippageBps ?? 0;
+    if (slippage > 50) return 'wide_spread';
+    const risk = parsed.extras?.executionRisk;
+    if (risk === 'high' || risk === 'extreme') return 'thin_book';
+    return 'liquid';
   }
   return undefined;
 }

@@ -20,6 +20,47 @@ export interface AlpacaNewsArticle {
   createdAt: string; // ISO
 }
 
+/**
+ * Compact NBBO quote snapshot. Fields beyond raw bid/ask are derived once at
+ * fetch time so every consumer (audit page, agent prompt) sees the same
+ * spread math.
+ */
+export interface AlpacaQuote {
+  symbol: string;
+  bid: number;
+  ask: number;
+  bidSize: number; // round-lot multiplier per Alpaca's `bs`
+  askSize: number;
+  midPrice: number;
+  spreadAbs: number;
+  spreadBps: number;
+  /// ISO timestamp of the quote. On the IEX free tier this is ~15min delayed
+  /// during market hours; the agent acknowledges that.
+  timestamp: string;
+  /// Seconds between `timestamp` and fetch time. Above ~900s = stale (the
+  /// free tier delay floor) and the agent should treat sizing decisions with
+  /// extra caution.
+  quoteAgeSeconds: number;
+}
+
+/**
+ * Asset metadata that drives execution sanity checks: can we trade it at all?
+ * Is it short-able and how cheaply? Fractional shares allowed? Source:
+ * `paper-api.alpaca.markets/v2/assets/{symbol}` (free tier).
+ */
+export interface AlpacaAssetInfo {
+  symbol: string;
+  tradable: boolean;
+  shortable: boolean;
+  easyToBorrow: boolean;
+  marginable: boolean;
+  fractionable: boolean;
+  /// 'us_equity' | 'crypto' | etc.
+  assetClass: string;
+  /// Free-form per Alpaca: 'active' | 'inactive'
+  status: string;
+}
+
 export interface AlpacaService {
   getDailyBars(symbol: string, limit: number): Promise<DailyBar[]>;
   getCurrentPrice(symbol: string): Promise<number>;
@@ -34,6 +75,20 @@ export interface AlpacaService {
     symbol: string,
     daysBack: number,
   ): Promise<FetchWithAuditResult<AlpacaNewsArticle[]>>;
+  /**
+   * Most recent NBBO quote. On IEX free tier the quote is ~15min delayed
+   * during market hours and reflects IEX-only liquidity — the
+   * liquiditySlippage agent's prompt acknowledges this and weights the
+   * signal accordingly.
+   */
+  getLatestQuote(symbol: string): Promise<FetchWithAuditResult<AlpacaQuote>>;
+  /**
+   * Static-ish asset metadata: tradable / shortable / easy-to-borrow /
+   * marginable / fractionable. Used by liquiditySlippage to detect
+   * mechanical un-tradability (delisted, non-shortable when SELL is intended,
+   * etc.).
+   */
+  getAssetInfo(symbol: string): Promise<FetchWithAuditResult<AlpacaAssetInfo>>;
 }
 
 /**
@@ -81,6 +136,64 @@ class MockAlpacaService implements AlpacaService {
           });
         }
         return out;
+      },
+    });
+  }
+
+  async getLatestQuote(symbol: string) {
+    return fetchWithAudit<AlpacaQuote>({
+      source: 'alpaca_quote',
+      symbol,
+      url: `mock://alpaca/quote/${symbol}`,
+      fetcher: async () => {
+        // Spread scales with price magnitude (a $10 stock has wider bps than
+        // a $400 stock under the same penny tick). Sized to exercise the
+        // agent's interpretation branches: most large caps land in "tight",
+        // some test symbols land "wide" so the veto path fires in dev.
+        const mid = seededClose(symbol, new Date());
+        const seed = symbol.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+        // Spread = $0.01 baseline, scales up for low-priced / illiquid names.
+        const spreadAbs = mid < 20 ? 0.02 + (seed % 5) * 0.005 : 0.01 + (seed % 3) * 0.002;
+        const bid = +(mid - spreadAbs / 2).toFixed(2);
+        const ask = +(mid + spreadAbs / 2).toFixed(2);
+        const bidSize = 100 + (seed % 50) * 100;
+        const askSize = 100 + ((seed + 7) % 50) * 100;
+        const now = new Date();
+        return {
+          symbol,
+          bid,
+          ask,
+          bidSize,
+          askSize,
+          midPrice: +mid.toFixed(2),
+          spreadAbs: +spreadAbs.toFixed(4),
+          spreadBps: +((spreadAbs / mid) * 10_000).toFixed(2),
+          timestamp: now.toISOString(),
+          quoteAgeSeconds: 0,
+        };
+      },
+    });
+  }
+
+  async getAssetInfo(symbol: string) {
+    return fetchWithAudit<AlpacaAssetInfo>({
+      source: 'alpaca_asset_info',
+      symbol,
+      url: `mock://alpaca/assets/${symbol}`,
+      fetcher: async () => {
+        const seed = symbol.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+        // Most names tradable + shortable in the mock so the happy path
+        // dominates; a few synthetic symbols flip to exercise the veto branch.
+        return {
+          symbol,
+          tradable: true,
+          shortable: seed % 7 !== 0,
+          easyToBorrow: seed % 5 !== 0,
+          marginable: true,
+          fractionable: true,
+          assetClass: 'us_equity',
+          status: 'active',
+        };
       },
     });
   }

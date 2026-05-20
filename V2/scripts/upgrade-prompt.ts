@@ -28,6 +28,7 @@ import { DEVILS_ADVOCATE_PROMPT_V_0_2_0 } from '../backend/src/prompts/devilsAdv
 import { CRITIC_PROMPT_V_0_2_0 } from '../backend/src/prompts/critic.v0.2.0';
 import { NEWS_EVENTS_PROMPT_V_0_3_0 } from '../backend/src/prompts/newsEvents.v0.3.0';
 import { MACRO_CONTEXT_PROMPT_V_0_3_0 } from '../backend/src/prompts/macroContext.v0.3.0';
+import { LIQUIDITY_SLIPPAGE_PROMPT_V_0_3_0 } from '../backend/src/prompts/liquiditySlippage.v0.3.0';
 import { outputContractFor } from '../backend/src/schemas/agent-outputs';
 
 interface Upgrade {
@@ -61,6 +62,7 @@ const REGISTRY: Upgrade[] = [
   // the FeedFetch + FeedConsumption audit pipeline.
   { agentName: 'newsEvents',        version: '0.3.0', directiveTemplate: NEWS_EVENTS_PROMPT_V_0_3_0,        changelog: 'v0.3.0: real Alpaca news + Finnhub company news + Finnhub earnings + US macro calendar wired. Forced-hold rule binds on real earnings/FOMC proximity. Evidence-standard rationale required.' },
   { agentName: 'macroContext',      version: '0.3.0', directiveTemplate: MACRO_CONTEXT_PROMPT_V_0_3_0,      changelog: 'v0.3.0: real SPY/QQQ regime via Alpaca + 11 sector ETF performance ranking + FRED 10Y/VIX/dollar series wired. Tailwind/headwind scores computed from actual feed values. Evidence-standard rationale required.' },
+  { agentName: 'liquiditySlippage', version: '0.3.0', directiveTemplate: LIQUIDITY_SLIPPAGE_PROMPT_V_0_3_0, changelog: 'v0.3.0: real NBBO quote (bid/ask/depth/age) + asset info (shortable/tradable/easyToBorrow) wired. Spread now read in actual bps. IEX free-tier delay acknowledged. Veto thresholds bind on real values.' },
 ];
 
 function findUpgrade(agentName: string, version: string): Upgrade | undefined {

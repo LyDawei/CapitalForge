@@ -13,7 +13,7 @@
  *   - 401 fails loud, 429 backs off and retries, 5xx retries up to 3x
  *   - All bars normalized to the V2 DailyBar shape (date = YYYY-MM-DD)
  */
-import type { AlpacaNewsArticle, AlpacaService, DailyBar } from './alpaca';
+import type { AlpacaAssetInfo, AlpacaNewsArticle, AlpacaQuote, AlpacaService, DailyBar } from './alpaca';
 import { fetchWithAudit } from './feedLog';
 
 interface AlpacaBarResponse {
@@ -193,6 +193,83 @@ export class RealAlpacaService implements AlpacaService {
           url: a.url,
           createdAt: a.created_at,
         }));
+      },
+    });
+  }
+
+  async getLatestQuote(symbol: string) {
+    // NBBO snapshot. Free IEX feed is ~15min delayed during market hours.
+    // The agent reads `quoteAgeSeconds` to weight the signal.
+    const url = `${this.dataBaseUrl}/v2/stocks/${symbol}/quotes/latest?feed=${this.feed}`;
+    return fetchWithAudit<AlpacaQuote>({
+      source: 'alpaca_quote',
+      symbol,
+      url,
+      fetcher: async () => {
+        const data = await this.request<{
+          quote?: { bp: number; ap: number; bs: number; as: number; t: string };
+        }>(url);
+        const q = data.quote;
+        if (!q) throw new Error(`Alpaca quote: empty response for ${symbol}`);
+        const mid = (q.bp + q.ap) / 2;
+        const spreadAbs = q.ap - q.bp;
+        const spreadBps = mid > 0 ? (spreadAbs / mid) * 10_000 : 0;
+        const ts = new Date(q.t);
+        const ageSeconds = Math.max(0, Math.floor((Date.now() - ts.getTime()) / 1000));
+        return {
+          symbol,
+          bid: q.bp,
+          ask: q.ap,
+          bidSize: q.bs,
+          askSize: q.as,
+          midPrice: +mid.toFixed(4),
+          spreadAbs: +spreadAbs.toFixed(4),
+          spreadBps: +spreadBps.toFixed(2),
+          timestamp: q.t,
+          quoteAgeSeconds: ageSeconds,
+        };
+      },
+    });
+  }
+
+  async getAssetInfo(symbol: string) {
+    // Asset metadata lives on the TRADING API host (paper-api.alpaca.markets),
+    // not the data host. Same auth headers though. Use the configured
+    // trading base from env via process.env to avoid widening the
+    // RealAlpacaOptions surface for a metadata endpoint.
+    const tradingBase = process.env.ALPACA_BASE_URL ?? 'https://paper-api.alpaca.markets';
+    const url = `${tradingBase}/v2/assets/${symbol}`;
+    return fetchWithAudit<AlpacaAssetInfo>({
+      source: 'alpaca_asset_info',
+      symbol,
+      url,
+      fetcher: async () => {
+        await this.limiter.take();
+        const res = await fetch(url, { method: 'GET', headers: this.headers });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(`Alpaca assets ${res.status}: ${body || res.statusText}`);
+        }
+        const a = (await res.json()) as {
+          symbol: string;
+          tradable: boolean;
+          shortable: boolean;
+          easy_to_borrow: boolean;
+          marginable: boolean;
+          fractionable: boolean;
+          class: string;
+          status: string;
+        };
+        return {
+          symbol: a.symbol,
+          tradable: a.tradable,
+          shortable: a.shortable,
+          easyToBorrow: a.easy_to_borrow,
+          marginable: a.marginable,
+          fractionable: a.fractionable,
+          assetClass: a.class,
+          status: a.status,
+        };
       },
     });
   }

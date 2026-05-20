@@ -167,13 +167,38 @@ function generateForAgent(agent: string, seed: number): any {
         sectorRsRank: (seed % 11) + 1,
       };
       break;
-    case 'liquiditySlippage':
+    case 'liquiditySlippage': {
       base.bullishScore = 0;
+      // Mock output shape matches the v0.3.0 prompt's required fields so
+      // downstream consumers (head trader veto reads, influenceTag derivation)
+      // see realistic structure even in dev mode.
+      const spreadBps = seededFloat(seed, 2, 60);
+      const tradable = spreadBps < 50 && seed % 11 !== 0;
+      const executionRisk =
+        spreadBps >= 50 || !tradable
+          ? 'extreme'
+          : spreadBps >= 20
+            ? 'high'
+            : spreadBps >= 8
+              ? 'moderate'
+              : 'low';
+      const dollarDepth = 500 + (seed % 20) * 500;
       base.extras = {
-        tradableScore: seededFloat(seed, 0.6, 1.0),
-        expectedSlippageBps: seededFloat(seed >> 1, 1, 25),
+        tradable,
+        spreadBps,
+        executionRisk,
+        estimatedSlippageBps: +(spreadBps * 1.2).toFixed(2),
+        maxSuggestedPositionSize: tradable ? Math.min(dollarDepth * 3, 3000) : 0,
+        nbboDollarDepth: dollarDepth,
+        shortable: seed % 7 !== 0,
+        // Confidence reflects the agent's certainty in the tradability call,
+        // not the magnitude of the spread.
       };
+      if (!tradable) base.flags.push('illiquid');
+      else if (spreadBps >= 20) base.flags.push('wide_spread');
+      else base.flags.push('tradable');
       break;
+    }
     case 'headTrader':
       return generateHeadTrader(seed, score, conf);
     case 'riskAuditor':
