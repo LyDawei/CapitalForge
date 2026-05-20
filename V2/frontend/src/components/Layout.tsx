@@ -11,6 +11,7 @@ export default function Layout() {
           <NavLink to="/cycles">Cycles</NavLink>
           <NavLink to="/trades">Trades</NavLink>
           <NavLink to="/wallet">Wallet</NavLink>
+          <NavLink to="/feeds">Feeds</NavLink>
           <NavLink to="/prompts">Prompts</NavLink>
           <NavLink to="/audit">Audit</NavLink>
           <NavLink to="/settings">Settings</NavLink>

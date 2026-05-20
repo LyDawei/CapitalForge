@@ -6,6 +6,8 @@ import { getStrategyPreset } from '../config/presets';
 import { validateAgentOutput } from '../schemas/agent-outputs';
 import { getBalance as getWalletBalance } from '../services/wallet';
 import { settleProposedPlans } from './settler';
+import { fetchNewsEventsBundle, fetchMacroContextBundle, type FeedBundle } from './agentFeeds';
+import { recordConsumption } from '../services/feedLog';
 
 // ---------------------------------------------------------------------------
 // Specialist names — must match what's seeded in the Agent table.
@@ -106,9 +108,31 @@ export async function runCycle(symbol: string, date: string): Promise<CycleResul
     });
     const agentMap = new Map(agents.map((a) => [a.name, a]));
 
+    // 5a. Pre-fetch external feeds for agents that need them. Done once per
+    //     cycle (not once per variant) so primary + shadow A/B both consume
+    //     the same FeedFetch rows — that's the whole point of A/B: only the
+    //     prompt varies, the data doesn't.
+    const feedsByAgent: Map<string, FeedBundle> = new Map();
+    const [newsBundle, macroBundle] = await Promise.all([
+      fetchNewsEventsBundle(symbol).catch((err: any) => {
+        // eslint-disable-next-line no-console
+        console.warn(`[cycle ${symbol}@${date}] newsEvents feeds failed: ${err.message}`);
+        return { contextBlock: '', feedFetchIds: [] };
+      }),
+      fetchMacroContextBundle().catch((err: any) => {
+        // eslint-disable-next-line no-console
+        console.warn(`[cycle ${symbol}@${date}] macroContext feeds failed: ${err.message}`);
+        return { contextBlock: '', feedFetchIds: [] };
+      }),
+    ]);
+    feedsByAgent.set('newsEvents', newsBundle);
+    feedsByAgent.set('macroContext', macroBundle);
+
     // 5. Run all 8 specialists in parallel — primary chain feeds downstream.
     const specialistResults = await Promise.all(
-      SPECIALIST_NAMES.map((name) => runSpecialist(name, cycle.id, tech, agentMap, basePrompt, 'primary')),
+      SPECIALIST_NAMES.map((name) =>
+        runSpecialist(name, cycle.id, tech, agentMap, basePrompt, 'primary', feedsByAgent.get(name)),
+      ),
     );
 
     // 5b. Persist primary SpecialistAnalysis rows.
@@ -121,7 +145,7 @@ export async function runCycle(symbol: string, date: string): Promise<CycleResul
     //     These don't feed the head trader; they exist purely for A/B audit.
     await Promise.all(
       SPECIALIST_NAMES.map(async (name) => {
-        const sr = await runSpecialist(name, cycle.id, tech, agentMap, basePrompt, 'ab');
+        const sr = await runSpecialist(name, cycle.id, tech, agentMap, basePrompt, 'ab', feedsByAgent.get(name));
         if (sr) await persistSpecialistAnalysis(cycle.id, sr);
       }),
     );
@@ -286,12 +310,15 @@ async function runSpecialist(
   agentMap: Map<string, any>,
   basePrompt: { id: string; template: string } | undefined,
   variant: 'primary' | 'ab',
+  feeds?: FeedBundle,
 ): Promise<SpecialistRunResult | null> {
   const agent = agentMap.get(name);
   const pv = pickPromptVersion(agent, variant);
   if (!agent || !pv) return null;
 
-  const renderedPrompt = renderTemplate(renderFullTemplate(pv), tech);
+  const renderedPrompt =
+    renderTemplate(renderFullTemplate(pv), tech) +
+    (feeds && feeds.contextBlock ? `\n\n${feeds.contextBlock}` : '');
 
   const result = await runAgent({
     agentId: agent.id,
@@ -299,12 +326,49 @@ async function runSpecialist(
     basePrompt,
     cycleId,
     renderedPrompt,
-    inputPayload: { technicals: tech },
+    inputPayload: { technicals: tech, feedFetchIds: feeds?.feedFetchIds ?? [] },
     validate: (raw) => validateAgentOutput(name, raw),
     runKind: variant,
   });
 
+  // Audit trail: record that this agent run consumed each feed pull. The
+  // influenceTag is left null at this stage — a future iteration can derive
+  // it from the agent's parsed output (e.g., set 'forced_hold' when
+  // newsEvents emitted forcedHoldRecommended=true).
+  if (feeds && feeds.feedFetchIds.length > 0) {
+    await recordConsumption({
+      feedFetchIds: feeds.feedFetchIds,
+      agentRunId: result.agentRunId,
+      cycleId,
+      influenceTag: inferInfluenceTag(name, result.parsed),
+    });
+  }
+
   return { ...result, agentName: name };
+}
+
+/**
+ * Best-effort agent-self-reported influence tag, derived from the parsed
+ * output. Kept conservative: if we can't read a clear signal, leave null
+ * (which the UI renders as "consumed, impact unknown").
+ */
+function inferInfluenceTag(agentName: string, parsed: any): string | undefined {
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  if (agentName === 'newsEvents') {
+    if (parsed.extras?.forcedHoldRecommended === true) return 'forced_hold';
+    if (parsed.extras?.catalystImminent === true) return 'catalyst_imminent';
+    if ((parsed.confidence ?? 0) <= 0.25) return 'no_signal';
+    return 'sentiment_only';
+  }
+  if (agentName === 'macroContext') {
+    const headwind = parsed.extras?.macroHeadwindScore ?? 0;
+    const tailwind = parsed.extras?.macroTailwindScore ?? 0;
+    if (headwind > 0.6) return 'headwind';
+    if (tailwind > 0.6) return 'tailwind';
+    if ((parsed.confidence ?? 0) <= 0.25) return 'no_signal';
+    return 'neutral';
+  }
+  return undefined;
 }
 
 async function persistSpecialistAnalysis(cycleId: string, sr: SpecialistRunResult) {

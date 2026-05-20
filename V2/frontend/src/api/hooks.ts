@@ -321,3 +321,65 @@ export const useWalletTransactions = (limit = 50, offset = 0) =>
         `/api/wallet/transactions?limit=${limit}&offset=${offset}`,
       ),
   });
+
+// ---- Feeds ----
+export interface FeedFetchRow {
+  id: string;
+  source: string;
+  symbol: string | null;
+  url: string | null;
+  fetchedAt: string;
+  latencyMs: number;
+  costUsd: number | null;
+  errored: boolean;
+  errorMessage: string | null;
+  _count: { consumptions: number };
+}
+export interface FeedFetchDetail extends FeedFetchRow {
+  payload: any;
+  consumptions: Array<{
+    id: string;
+    influenceTag: string | null;
+    cycleId: string | null;
+    agentRun: {
+      id: string;
+      runKind: string;
+      schemaValid: boolean;
+      parsedOutput: any;
+      cycleId: string | null;
+      agent: { name: string; displayName: string };
+    };
+  }>;
+}
+export interface FeedSourceSummary {
+  source: string;
+  totalFetches: number;
+  totalLatencyMs: number;
+  totalCostUsd: number;
+}
+
+export const useFeeds = (params: { source?: string; symbol?: string; errored?: boolean; limit?: number; offset?: number } = {}) => {
+  const qs = new URLSearchParams();
+  if (params.source) qs.set('source', params.source);
+  if (params.symbol) qs.set('symbol', params.symbol);
+  if (params.errored !== undefined) qs.set('errored', String(params.errored));
+  qs.set('limit', String(params.limit ?? 50));
+  qs.set('offset', String(params.offset ?? 0));
+  return useQuery({
+    queryKey: ['feeds', params],
+    queryFn: () => api<{ fetches: FeedFetchRow[]; total: number; limit: number; offset: number }>(`/api/feeds?${qs}`),
+  });
+};
+
+export const useFeedDetail = (id: string | undefined) =>
+  useQuery({
+    queryKey: ['feed', id],
+    queryFn: () => api<FeedFetchDetail>(`/api/feeds/${id}`),
+    enabled: !!id,
+  });
+
+export const useFeedSourceSummary = () =>
+  useQuery({
+    queryKey: ['feed-source-summary'],
+    queryFn: () => api<FeedSourceSummary[]>('/api/feeds/sources/summary'),
+  });

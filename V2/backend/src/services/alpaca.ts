@@ -1,4 +1,5 @@
 import { env } from '../env';
+import { fetchWithAudit, type FetchWithAuditResult } from './feedLog';
 
 export interface DailyBar {
   date: string; // YYYY-MM-DD
@@ -9,11 +10,30 @@ export interface DailyBar {
   volume: number;
 }
 
+export interface AlpacaNewsArticle {
+  id: number;
+  symbol: string;
+  headline: string;
+  summary: string;
+  source: string;
+  url: string;
+  createdAt: string; // ISO
+}
+
 export interface AlpacaService {
   getDailyBars(symbol: string, limit: number): Promise<DailyBar[]>;
   getCurrentPrice(symbol: string): Promise<number>;
   /** Bars strictly AFTER the given date — used by trade-outcome settler. */
   getBarsAfter(symbol: string, afterDate: string, count: number): Promise<DailyBar[]>;
+  /**
+   * Recent news for a symbol, with audit-trail metadata wrapper. Up to
+   * `daysBack` days of articles (capped at the Alpaca free tier's effective
+   * limit of ~50 per response).
+   */
+  getNews(
+    symbol: string,
+    daysBack: number,
+  ): Promise<FetchWithAuditResult<AlpacaNewsArticle[]>>;
 }
 
 /**
@@ -30,6 +50,39 @@ class MockAlpacaService implements AlpacaService {
     const start = new Date(afterDate);
     start.setDate(start.getDate() + 1);
     return generateBars(symbol, start, count);
+  }
+  async getNews(symbol: string, daysBack: number) {
+    return fetchWithAudit<AlpacaNewsArticle[]>({
+      source: 'alpaca_news',
+      symbol,
+      url: `mock://alpaca/news/${symbol}`,
+      fetcher: async () => {
+        const seed = symbol.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+        const count = 2 + (seed % 3);
+        const now = new Date();
+        const out: AlpacaNewsArticle[] = [];
+        const corpus = [
+          `${symbol} guidance raised after strong quarterly preprint`,
+          `${symbol} broker initiation: Buy, $${100 + (seed % 50)} PT`,
+          `${symbol} unusual options activity ahead of catalyst`,
+          `Hedge fund 13F shows reduced ${symbol} position`,
+        ];
+        for (let i = 0; i < Math.min(count, daysBack); i++) {
+          const d = new Date(now);
+          d.setUTCDate(now.getUTCDate() - i);
+          out.push({
+            id: seed * 10 + i,
+            symbol,
+            headline: corpus[(seed + i) % corpus.length]!,
+            summary: corpus[(seed + i) % corpus.length]!,
+            source: 'mock',
+            url: `mock://alpaca/article/${seed * 10 + i}`,
+            createdAt: d.toISOString(),
+          });
+        }
+        return out;
+      },
+    });
   }
 }
 

@@ -20,6 +20,7 @@ import { registerRunnerRoutes } from './routes/runner';
 import { registerConfigRoutes } from './routes/config';
 import { registerBasePromptRoutes } from './routes/basePrompts';
 import { registerWalletRoutes } from './routes/wallet';
+import { registerFeedRoutes } from './routes/feeds';
 
 async function build() {
   const app = Fastify({ logger: { level: env.LOG_LEVEL } }).withTypeProvider<ZodTypeProvider>();
@@ -50,6 +51,7 @@ async function build() {
   await app.register(registerConfigRoutes, { prefix: '/api/config' });
   await app.register(registerBasePromptRoutes, { prefix: '/api/base-prompts' });
   await app.register(registerWalletRoutes, { prefix: '/api/wallet' });
+  await app.register(registerFeedRoutes, { prefix: '/api/feeds' });
 
   app.addHook('onClose', async () => {
     await prisma.$disconnect();

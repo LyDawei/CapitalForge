@@ -26,6 +26,8 @@ import { HEAD_TRADER_PROMPT_V_0_2_0 } from '../backend/src/prompts/headTrader.v0
 import { RISK_AUDITOR_PROMPT_V_0_2_0 } from '../backend/src/prompts/riskAuditor.v0.2.0';
 import { DEVILS_ADVOCATE_PROMPT_V_0_2_0 } from '../backend/src/prompts/devilsAdvocate.v0.2.0';
 import { CRITIC_PROMPT_V_0_2_0 } from '../backend/src/prompts/critic.v0.2.0';
+import { NEWS_EVENTS_PROMPT_V_0_3_0 } from '../backend/src/prompts/newsEvents.v0.3.0';
+import { MACRO_CONTEXT_PROMPT_V_0_3_0 } from '../backend/src/prompts/macroContext.v0.3.0';
 import { outputContractFor } from '../backend/src/schemas/agent-outputs';
 
 interface Upgrade {
@@ -53,6 +55,12 @@ const REGISTRY: Upgrade[] = [
   { agentName: 'riskAuditor',       version: '0.2.0', directiveTemplate: RISK_AUDITOR_PROMPT_V_0_2_0,       changelog: COMMON_V020_CHANGELOG + ' First-class vetoRecommended boolean. Granular stop / sizing / concentration / R-multiple checks.' },
   { agentName: 'devilsAdvocate',    version: '0.2.0', directiveTemplate: DEVILS_ADVOCATE_PROMPT_V_0_2_0,    changelog: COMMON_V020_CHANGELOG + ' "Avoid generic pessimism" + evidence standard. Granular failure scenarios + weak signals + hidden risks.' },
   { agentName: 'critic',            version: '0.2.0', directiveTemplate: CRITIC_PROMPT_V_0_2_0,             changelog: COMMON_V020_CHANGELOG + ' Adds outcomeAssessment + rootCauseAnalysis + lessonTags + promptImprovementSuggestions for closed-loop learning. NOTE: critic invocation by the runner is still TBD.' },
+
+  // v0.3.0 — real feeds wired. The "no service" branches are gone; both
+  // agents now interpret actual Alpaca / Finnhub / FRED data flowing through
+  // the FeedFetch + FeedConsumption audit pipeline.
+  { agentName: 'newsEvents',        version: '0.3.0', directiveTemplate: NEWS_EVENTS_PROMPT_V_0_3_0,        changelog: 'v0.3.0: real Alpaca news + Finnhub company news + Finnhub earnings + US macro calendar wired. Forced-hold rule binds on real earnings/FOMC proximity. Evidence-standard rationale required.' },
+  { agentName: 'macroContext',      version: '0.3.0', directiveTemplate: MACRO_CONTEXT_PROMPT_V_0_3_0,      changelog: 'v0.3.0: real SPY/QQQ regime via Alpaca + 11 sector ETF performance ranking + FRED 10Y/VIX/dollar series wired. Tailwind/headwind scores computed from actual feed values. Evidence-standard rationale required.' },
 ];
 
 function findUpgrade(agentName: string, version: string): Upgrade | undefined {

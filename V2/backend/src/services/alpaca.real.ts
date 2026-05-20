@@ -13,7 +13,8 @@
  *   - 401 fails loud, 429 backs off and retries, 5xx retries up to 3x
  *   - All bars normalized to the V2 DailyBar shape (date = YYYY-MM-DD)
  */
-import type { AlpacaService, DailyBar } from './alpaca';
+import type { AlpacaNewsArticle, AlpacaService, DailyBar } from './alpaca';
+import { fetchWithAudit } from './feedLog';
 
 interface AlpacaBarResponse {
   bars?: Array<{
@@ -152,6 +153,48 @@ export class RealAlpacaService implements AlpacaService {
       throw new Error(`No price data available for ${symbol}`);
     }
     return bars[bars.length - 1]!.close;
+  }
+
+  async getNews(symbol: string, daysBack: number) {
+    // Alpaca's news lives at the news.alpaca.markets host (v1beta1). Auth uses
+    // the same APCA headers as the data API.
+    const end = new Date();
+    const start = new Date(end);
+    start.setUTCDate(start.getUTCDate() - daysBack);
+    const url = `https://data.alpaca.markets/v1beta1/news?symbols=${symbol}&start=${start.toISOString()}&end=${end.toISOString()}&limit=50`;
+    return fetchWithAudit<AlpacaNewsArticle[]>({
+      source: 'alpaca_news',
+      symbol,
+      url,
+      fetcher: async () => {
+        await this.limiter.take();
+        const res = await fetch(url, { method: 'GET', headers: this.headers });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(`Alpaca news ${res.status}: ${body || res.statusText}`);
+        }
+        const data = (await res.json()) as {
+          news?: Array<{
+            id: number;
+            headline: string;
+            summary: string;
+            source: string;
+            url: string;
+            created_at: string;
+            symbols?: string[];
+          }>;
+        };
+        return (data.news ?? []).map((a) => ({
+          id: a.id,
+          symbol,
+          headline: a.headline,
+          summary: a.summary,
+          source: a.source,
+          url: a.url,
+          createdAt: a.created_at,
+        }));
+      },
+    });
   }
 
   /**

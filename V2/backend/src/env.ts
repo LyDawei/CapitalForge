@@ -27,6 +27,14 @@ const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().default(''),
   ANTHROPIC_API_KEY: z.string().default(''),
 
+  /// FRED — Federal Reserve Economic Data. Free, registration only at
+  /// https://fred.stlouisfed.org/docs/api/api_key.html. Powers macroContext.
+  FRED_API_KEY: z.string().default(''),
+  /// Finnhub — earnings calendar, company news, economic calendar. Free tier
+  /// is 60 req/min. Register at https://finnhub.io/dashboard.
+  FINNHUB_API_KEY: z.string().default(''),
+  FINNHUB_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(50),
+
   MODE: z.enum(['mock', 'paper']).default('mock'),
 });
 

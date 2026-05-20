@@ -200,6 +200,7 @@ model AgentRun {
   tradePlan          TradePlan?
   toolCalls          ToolCall[]
   critique           Critique?
+  feedConsumptions   FeedConsumption[]
 
   @@index([agentId, createdAt])
   @@index([cycleId])
@@ -208,6 +209,62 @@ model AgentRun {
   @@index([inputHash])
   @@index([schemaValid])
   @@index([runKind])
+}
+
+// ============================================================================
+// FeedFetch — one row per external-data pull (news, earnings, FRED series,
+// economic calendar, etc.). Every fetch is auditable: source, URL, payload,
+// latency, cost. Joined to AgentRun via FeedConsumption so we can answer
+// "what decisions were made because of this article / data point?"
+// ============================================================================
+
+model FeedFetch {
+  id           String   @id @default(uuid())
+  /// 'alpaca_news' | 'finnhub_company_news' | 'finnhub_earnings' |
+  /// 'finnhub_economic_calendar' | 'fred_dgs10' | 'fred_vixcls' | etc.
+  source       String
+  /// Symbol the fetch was for. Null for macro / market-wide feeds.
+  symbol       String?
+  /// Canonical request URL (or, for news, the canonical article URL).
+  url          String?
+  fetchedAt    DateTime @default(now())
+  /// Full normalized response. For news, an array of articles; for FRED,
+  /// the parsed observation; for calendars, the upcoming events list.
+  payload      Json
+  latencyMs    Int
+  costUsd      Float?
+  errored      Boolean  @default(false)
+  errorMessage String?
+
+  consumptions FeedConsumption[]
+
+  @@index([source, fetchedAt])
+  @@index([symbol, fetchedAt])
+  @@index([errored])
+}
+
+// ============================================================================
+// FeedConsumption — join row recording that a specific AgentRun saw a
+// specific FeedFetch. `influenceTag` is the agent's self-reported impact
+// (e.g., "forced_hold" when newsEvents flipped to HOLD because earnings
+// were 2 days out, "no_impact" when the data was seen but didn't change
+// the call). Used by the audit UI to surface "decisions driven by feed X."
+// ============================================================================
+
+model FeedConsumption {
+  id           String   @id @default(uuid())
+  feedFetchId  String
+  agentRunId   String
+  cycleId      String?
+  influenceTag String?
+  createdAt    DateTime @default(now())
+
+  feedFetch FeedFetch @relation(fields: [feedFetchId], references: [id], onDelete: Cascade)
+  agentRun  AgentRun  @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  @@index([agentRunId])
+  @@index([feedFetchId])
+  @@index([cycleId])
 }
 
 // ============================================================================
