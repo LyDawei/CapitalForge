@@ -45,8 +45,6 @@ model Agent {
 
   promptVersions PromptVersion[]
   runs           AgentRun[]
-  metrics        AgentMetricSnapshot[]
-  notes          AgentNote[]
 
   @@index([kind])
 }
@@ -445,59 +443,6 @@ model Anomaly {
 }
 
 // ============================================================================
-// AgentMetricSnapshot — pre-computed rolling metrics per agent per window.
-// The audit job writes these so the UI doesn't recompute on every load.
-// ============================================================================
-
-model AgentMetricSnapshot {
-  id              String   @id @default(uuid())
-  agentId         String
-  /// "7d" | "30d" | "90d" | "all"
-  window          String
-  periodStart     DateTime
-  periodEnd       DateTime
-  sampleSize      Int
-  /// Hit rate over closed trades influenced by this agent.
-  hitRate         Float?
-  /// Brier score for confidence calibration (lower = better).
-  brierScore      Float?
-  avgConfidence   Float?
-  avgLatencyMs    Float?
-  p95LatencyMs    Float?
-  totalCostUsd    Float?
-  schemaFailRate  Float?
-  /// Variance across replay runs with identical inputs (0 = perfectly stable).
-  stabilityScore  Float?
-  /// Full snapshot payload for the UI to consume without recomputation.
-  payload         Json?
-  createdAt       DateTime @default(now())
-
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@unique([agentId, window, periodEnd])
-  @@index([agentId, window])
-}
-
-// ============================================================================
-// AgentNote — user-written observations attached to a specific agent.
-// ============================================================================
-
-model AgentNote {
-  id        String   @id @default(uuid())
-  agentId   String
-  cycleId   String?
-  author    String?
-  body      String   @db.Text
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@index([agentId, createdAt])
-  @@index([cycleId])
-}
-
-// ============================================================================
 // Wallet — persistent shared capital ledger.
 //
 // Replaces the snapshot-y `StrategyConfig.allocatedCapital` for sizing
@@ -554,25 +499,8 @@ model WalletTransaction {
 }
 
 // ============================================================================
-// SandboxState & RiskConfig — per-cycle sandbox + tunable knobs (mirrors V1).
+// RiskConfig — tunable risk knobs (sizing, drawdown ladder, default stops).
 // ============================================================================
-
-model SandboxState {
-  id               String   @id @default(uuid())
-  date             String
-  allocatedCapital Float
-  currentEquity    Float
-  peakEquity       Float
-  cashBalance      Float
-  positionQty      Float    @default(0)
-  positionSymbol   String?
-  positionAvgPrice Float?
-  drawdownPct      Float    @default(0)
-  createdAt        DateTime @default(now())
-
-  @@index([date])
-  @@index([createdAt])
-}
 
 model RiskConfig {
   id                     String   @id @default(uuid())
