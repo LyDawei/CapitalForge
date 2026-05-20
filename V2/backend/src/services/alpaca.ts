@@ -59,6 +59,25 @@ export interface AlpacaAssetInfo {
   assetClass: string;
   /// Free-form per Alpaca: 'active' | 'inactive'
   status: string;
+  /// Company name when available.
+  name?: string;
+  /// Exchange code (NASDAQ, NYSE, ARCA, etc.)
+  exchange?: string;
+}
+
+/**
+ * Lightweight per-symbol snapshot — what the screener pulls for many symbols
+ * at once. Uses Alpaca's bulk-snapshots endpoint when real; mock generates
+ * deterministic values.
+ */
+export interface AlpacaSnapshot {
+  symbol: string;
+  /// Latest daily bar.
+  latestClose: number;
+  latestVolume: number;
+  latestBarDate: string; // YYYY-MM-DD
+  /// Previous daily bar — lets the screener compute single-day momentum.
+  prevClose?: number;
 }
 
 export interface AlpacaService {
@@ -96,6 +115,19 @@ export interface AlpacaService {
    * etc.).
    */
   getAssetInfo(symbol: string): Promise<FetchWithAuditResult<AlpacaAssetInfo>>;
+  /**
+   * Enumerate the tradable US equity universe. Powers the growthScout
+   * pipeline — ~10k symbols returned in one call (free tier). The optional
+   * filters are applied client-side because Alpaca's endpoint is "all or
+   * nothing" on these.
+   */
+  listAssets(filters?: { status?: 'active' | 'inactive'; assetClass?: string }): Promise<FetchWithAuditResult<AlpacaAssetInfo[]>>;
+  /**
+   * Bulk snapshot for many symbols. Alpaca's `/v2/stocks/snapshots` accepts
+   * up to ~100 symbols per request. The screener batches large universes
+   * through here so it only burns ~100 API calls to cover 10k names.
+   */
+  getSnapshots(symbols: string[]): Promise<FetchWithAuditResult<AlpacaSnapshot[]>>;
 }
 
 /**
@@ -207,7 +239,70 @@ class MockAlpacaService implements AlpacaService {
           fractionable: true,
           assetClass: 'us_equity',
           status: 'active',
+          name: `${symbol} Inc.`,
+          exchange: seed % 2 === 0 ? 'NASDAQ' : 'NYSE',
         };
+      },
+    });
+  }
+
+  async listAssets() {
+    return fetchWithAudit<AlpacaAssetInfo[]>({
+      source: 'alpaca_assets_list',
+      url: `mock://alpaca/assets`,
+      fetcher: async () => {
+        // Synthetic universe: a curated set of well-known tickers plus a few
+        // microcaps so the screener's ADV filter has signal to work with.
+        const universe = [
+          'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA', 'AMD',
+          'AVGO', 'CRM', 'NFLX', 'INTC', 'CSCO', 'ORCL', 'IBM', 'QCOM',
+          'JPM', 'BAC', 'WFC', 'GS', 'MS', 'V', 'MA', 'AXP',
+          'JNJ', 'UNH', 'PFE', 'MRK', 'ABBV', 'LLY', 'TMO', 'ABT',
+          'XOM', 'CVX', 'COP', 'SLB',
+          'PG', 'KO', 'PEP', 'WMT', 'COST', 'TGT',
+          'BA', 'CAT', 'GE', 'HON',
+          'DIS', 'NKE', 'SBUX',
+          'PLTR', 'SNOW', 'NET', 'CRWD', 'ZS', 'DDOG', 'MDB',
+          'COIN', 'HOOD', 'SOFI',
+          'RIVN', 'LCID', 'NIO',
+          'GME', 'AMC', // microcaps
+        ];
+        return universe.map((symbol, i) => ({
+          symbol,
+          tradable: true,
+          shortable: i % 11 !== 0,
+          easyToBorrow: i % 7 !== 0,
+          marginable: true,
+          fractionable: true,
+          assetClass: 'us_equity',
+          status: 'active',
+          name: `${symbol} Inc.`,
+          exchange: i % 2 === 0 ? 'NASDAQ' : 'NYSE',
+        }));
+      },
+    });
+  }
+
+  async getSnapshots(symbols: string[]) {
+    return fetchWithAudit<AlpacaSnapshot[]>({
+      source: 'alpaca_snapshots',
+      url: `mock://alpaca/snapshots`,
+      fetcher: async () => {
+        const today = new Date();
+        return symbols.map((symbol) => {
+          const close = seededClose(symbol, today);
+          const seed = symbol.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+          // Volume scaled by symbol to ensure ADV varies across the universe —
+          // some pass the $50M filter, some don't.
+          const volumeBase = 500_000 + (seed * 137) % 50_000_000;
+          return {
+            symbol,
+            latestClose: close,
+            latestVolume: volumeBase,
+            latestBarDate: today.toISOString().slice(0, 10),
+            prevClose: +(close * (1 - ((seed % 10) - 5) / 1000)).toFixed(2),
+          };
+        });
       },
     });
   }

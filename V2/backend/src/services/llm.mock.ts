@@ -24,7 +24,7 @@ export class SmartMockLlmService implements LlmService {
     // Agent detection still keys off the role-specific marker, which lives in
     // the user prompt regardless of the base.
     const agentName = detectAgent(prompt);
-    const output = generateForAgent(agentName, seed);
+    const output = generateForAgent(agentName, seed, prompt);
     const text = JSON.stringify(output);
 
     // Simulate realistic latency (50-400ms range seeded)
@@ -80,6 +80,7 @@ function detectAgent(prompt: string): string {
     ['headTrader',        'you are the head trader'],
     ['riskAuditor',       'you are the risk auditor'],
     ['devilsAdvocate',    "you are the devil's advocate"],
+    ['growthScout',       'you are the growth scout'],
     ['critic',            'you are the critic'],                             // v0.2.0
     ['critic',            'you are the post-cycle critic'],                  // v0.1.0
     ['trendRegime',       'you are the trend & regime specialist'],          // v0.2.0
@@ -105,7 +106,7 @@ function detectAgent(prompt: string): string {
   return 'generic';
 }
 
-function generateForAgent(agent: string, seed: number): any {
+function generateForAgent(agent: string, seed: number, prompt: string = ''): any {
   const score = seededFloat(seed, -0.8, 0.8);
   const conf = seededFloat(seed >> 3, 0.25, 0.95);
   const base = {
@@ -207,6 +208,8 @@ function generateForAgent(agent: string, seed: number): any {
       return generateDevilsAdvocate(seed, conf);
     case 'critic':
       return generateCritic(seed);
+    case 'growthScout':
+      return generateGrowthScout(prompt, seed);
   }
   return base;
 }
@@ -291,5 +294,41 @@ function generateCritic(seed: number) {
       ['unrealistic_target'],
       ['good_trade'],
     ]),
+  };
+}
+
+function generateGrowthScout(prompt: string, seed: number) {
+  // Extract symbol from the CANDIDATE block so the mock echoes back what was
+  // actually being evaluated. Required by the GrowthScoutSchema.
+  const match = prompt.match(/symbol:\s*([A-Z]{1,10})/);
+  const symbol = match?.[1] ?? 'UNKNOWN';
+  // ~40% of mocks recommend for watchlist (score >= 0.65). The rest land
+  // below threshold so the operator UI shows both approve-worthy and
+  // borderline cases.
+  const viabilityScore = +(0.4 + ((seed % 100) / 100) * 0.5).toFixed(3);
+  const recommend = viabilityScore >= 0.65;
+  return {
+    symbol,
+    viabilityScore,
+    growthThesis: pick(seed, [
+      `${symbol} shows ~25% YoY revenue growth with analyst consensus leaning Buy; sustained 52-week-high position above 0.7.`,
+      `${symbol} has expanding ARR base with P/E reasonable for the growth rate; healthy ADV supports swing-trading size.`,
+      `${symbol} sector leadership with positive 30d momentum; fundamentals support multi-week swing setups.`,
+      `${symbol} has decent growth but valuation looks stretched; viability is borderline.`,
+    ]),
+    concerns: viabilityScore < 0.7
+      ? [
+          pick(seed, [
+            'P/E above 80 with revenue growth only 12% — paying premium for moderate growth.',
+            'Beta above 2.0 means the risk manager will downsize aggressively in chop.',
+            'Recent 30d return parabolic — likely already extended at the top of the range.',
+          ]),
+        ]
+      : [],
+    recommendForWatchlist: recommend,
+    rationale: [
+      `Quant: dollarVolume above $50M threshold; 1d return ${(((seed % 10) - 5) / 100).toFixed(2)}% (acceptable, not parabolic).`,
+      `Fundamentals: revenue growth tracks above sector median; analyst Buy-leaning consensus.`,
+    ],
   };
 }

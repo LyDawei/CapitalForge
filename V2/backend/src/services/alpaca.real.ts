@@ -13,7 +13,14 @@
  *   - 401 fails loud, 429 backs off and retries, 5xx retries up to 3x
  *   - All bars normalized to the V2 DailyBar shape (date = YYYY-MM-DD)
  */
-import type { AlpacaAssetInfo, AlpacaNewsArticle, AlpacaQuote, AlpacaService, DailyBar } from './alpaca';
+import type {
+  AlpacaAssetInfo,
+  AlpacaNewsArticle,
+  AlpacaQuote,
+  AlpacaService,
+  AlpacaSnapshot,
+  DailyBar,
+} from './alpaca';
 import { fetchWithAudit } from './feedLog';
 
 interface AlpacaBarResponse {
@@ -284,6 +291,85 @@ export class RealAlpacaService implements AlpacaService {
           assetClass: a.class,
           status: a.status,
         };
+      },
+    });
+  }
+
+  async listAssets(filters?: { status?: 'active' | 'inactive'; assetClass?: string }) {
+    // /v2/assets returns the full universe in one shot. Free tier, no pagination.
+    const tradingBase = process.env.ALPACA_BASE_URL ?? 'https://paper-api.alpaca.markets';
+    const params = new URLSearchParams();
+    if (filters?.status) params.set('status', filters.status);
+    if (filters?.assetClass) params.set('asset_class', filters.assetClass);
+    const url = `${tradingBase}/v2/assets${params.toString() ? '?' + params.toString() : ''}`;
+    return fetchWithAudit<AlpacaAssetInfo[]>({
+      source: 'alpaca_assets_list',
+      url,
+      fetcher: async () => {
+        await this.limiter.take();
+        const res = await fetch(url, { method: 'GET', headers: this.headers });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(`Alpaca assets list ${res.status}: ${body || res.statusText}`);
+        }
+        const list = (await res.json()) as Array<{
+          symbol: string;
+          name?: string;
+          exchange?: string;
+          class: string;
+          status: string;
+          tradable: boolean;
+          shortable: boolean;
+          easy_to_borrow: boolean;
+          marginable: boolean;
+          fractionable: boolean;
+        }>;
+        return list.map((a) => ({
+          symbol: a.symbol,
+          tradable: a.tradable,
+          shortable: a.shortable,
+          easyToBorrow: a.easy_to_borrow,
+          marginable: a.marginable,
+          fractionable: a.fractionable,
+          assetClass: a.class,
+          status: a.status,
+          name: a.name,
+          exchange: a.exchange,
+        }));
+      },
+    });
+  }
+
+  async getSnapshots(symbols: string[]) {
+    // Alpaca's bulk-snapshot endpoint: GET /v2/stocks/snapshots?symbols=A,B,...
+    // up to ~100 symbols per call. We chunk above this method when the
+    // universe is larger; here we just hit the endpoint with whatever was
+    // passed and let the caller handle batching.
+    const params = new URLSearchParams({ symbols: symbols.join(','), feed: this.feed });
+    const url = `${this.dataBaseUrl}/v2/stocks/snapshots?${params}`;
+    return fetchWithAudit<AlpacaSnapshot[]>({
+      source: 'alpaca_snapshots',
+      url,
+      fetcher: async () => {
+        const data = await this.request<
+          Record<
+            string,
+            {
+              dailyBar?: { c: number; v: number; t: string };
+              prevDailyBar?: { c: number };
+            }
+          >
+        >(url);
+        return symbols.map((symbol) => {
+          const snap = data[symbol];
+          return {
+            symbol,
+            latestClose: snap?.dailyBar?.c ?? 0,
+            latestVolume: snap?.dailyBar?.v ?? 0,
+            latestBarDate: snap?.dailyBar?.t?.slice(0, 10) ?? '',
+            prevClose: snap?.prevDailyBar?.c,
+          };
+        });
       },
     });
   }

@@ -42,6 +42,9 @@ export interface AgentRunResult {
   parseError: string | null;
   rawResponse: string;
   latencyMs: number;
+  costUsd: number | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
 }
 
 export async function runAgent(args: RunAgentArgs): Promise<AgentRunResult> {
@@ -107,5 +110,8 @@ export async function runAgent(args: RunAgentArgs): Promise<AgentRunResult> {
     parseError,
     rawResponse: completion.text,
     latencyMs: completion.latencyMs,
+    costUsd: completion.costUsd ?? null,
+    tokensIn: completion.tokensIn ?? null,
+    tokensOut: completion.tokensOut ?? null,
   };
 }

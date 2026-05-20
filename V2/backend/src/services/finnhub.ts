@@ -51,6 +51,28 @@ export interface EconomicEvent {
   previous?: number | null;
 }
 
+export interface CompanyMetrics {
+  symbol: string;
+  /// Partial — Finnhub may not have every field for every symbol.
+  peTtm?: number | null;
+  psTtm?: number | null;
+  pegTtm?: number | null;
+  marketCapMillions?: number | null;
+  /// Year-over-year earnings growth (latest quarter).
+  epsGrowthQuarterlyYoy?: number | null;
+  /// Year-over-year revenue growth (latest quarter).
+  revenueGrowthQuarterlyYoy?: number | null;
+  beta?: number | null;
+  weekHigh52?: number | null;
+  weekLow52?: number | null;
+  /// Position 0..1 = where current price sits within 52w range.
+  weekHighLow52Position?: number | null;
+  /// Analyst counts at the most recent revision.
+  analystBuy?: number | null;
+  analystHold?: number | null;
+  analystSell?: number | null;
+}
+
 export interface FinnhubService {
   getCompanyNews(
     symbol: string,
@@ -61,6 +83,13 @@ export interface FinnhubService {
     daysAhead: number,
   ): Promise<FetchWithAuditResult<EarningsEvent[]>>;
   getEconomicCalendar(daysAhead: number): Promise<FetchWithAuditResult<EconomicEvent[]>>;
+  /**
+   * Fundamentals + analyst consensus. Powers the growthScout agent's
+   * per-candidate evaluation. Best-effort: Finnhub often returns partial
+   * data on free tier; missing fields surface as null and the agent
+   * acknowledges thin coverage in its rationale.
+   */
+  getCompanyMetrics(symbol: string): Promise<FetchWithAuditResult<CompanyMetrics>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +224,44 @@ class RealFinnhubService implements FinnhubService {
       },
     });
   }
+
+  async getCompanyMetrics(symbol: string) {
+    const url = `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${this.apiKey}`;
+    return fetchWithAudit<CompanyMetrics>({
+      source: 'finnhub_company_metrics',
+      symbol,
+      url,
+      fetcher: async () => {
+        await this.bucket.take();
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Finnhub ${res.status}: ${await res.text().catch(() => '')}`);
+        const data = (await res.json()) as { metric?: any };
+        const m = data.metric ?? {};
+        const hi = m['52WeekHigh'] as number | undefined;
+        const lo = m['52WeekLow'] as number | undefined;
+        const close = m['lastClosePrice'] as number | undefined;
+        const position = hi != null && lo != null && hi > lo && close != null
+          ? +((close - lo) / (hi - lo)).toFixed(3)
+          : null;
+        return {
+          symbol,
+          peTtm: m.peTTM ?? null,
+          psTtm: m.psTTM ?? null,
+          pegTtm: m.pegTTM ?? null,
+          marketCapMillions: m.marketCapitalization ?? null,
+          epsGrowthQuarterlyYoy: m.epsGrowthQuarterlyYoy ?? null,
+          revenueGrowthQuarterlyYoy: m.revenueGrowthQuarterlyYoy ?? null,
+          beta: m.beta ?? null,
+          weekHigh52: hi ?? null,
+          weekLow52: lo ?? null,
+          weekHighLow52Position: position,
+          analystBuy: m.analystBuy ?? null,
+          analystHold: m.analystHold ?? null,
+          analystSell: m.analystSell ?? null,
+        };
+      },
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +346,47 @@ class MockFinnhubService implements FinnhubService {
             previous: 3.1,
           },
         ];
+      },
+    });
+  }
+
+  async getCompanyMetrics(symbol: string) {
+    return fetchWithAudit<CompanyMetrics>({
+      source: 'finnhub_company_metrics',
+      symbol,
+      url: `mock://finnhub/metric/${symbol}`,
+      fetcher: async () => {
+        // Deterministic synthetic fundamentals — vary by symbol so the scout
+        // sees a realistic spread of P/E, growth rates, etc. Some symbols
+        // pass viability gates, others don't, so the watchlist UX has both
+        // "approve" and "reject" candidates to show.
+        const seed = hashString(symbol);
+        // Roughly: half the names have decent fundamentals, half don't.
+        const goodSet = seed % 2 === 0;
+        const pe = goodSet ? 20 + (seed % 30) : 60 + (seed % 100);
+        const revGrowth = goodSet ? 0.15 + ((seed % 30) / 100) : -0.05 + ((seed % 15) / 100);
+        const epsGrowth = goodSet ? 0.20 + ((seed % 40) / 100) : -0.10 + ((seed % 15) / 100);
+        const marketCap = 500 + (seed % 4500); // $500M to $5B in mock
+        const beta = +(0.8 + ((seed % 25) / 10)).toFixed(2);
+        const high = 50 + (seed % 200);
+        const low = high * (0.5 + (seed % 30) / 100);
+        const close = low + (high - low) * ((seed % 100) / 100);
+        return {
+          symbol,
+          peTtm: +pe.toFixed(2),
+          psTtm: +(pe / 8).toFixed(2),
+          pegTtm: epsGrowth > 0 ? +(pe / (epsGrowth * 100)).toFixed(2) : null,
+          marketCapMillions: +marketCap.toFixed(0),
+          epsGrowthQuarterlyYoy: +epsGrowth.toFixed(3),
+          revenueGrowthQuarterlyYoy: +revGrowth.toFixed(3),
+          beta,
+          weekHigh52: +high.toFixed(2),
+          weekLow52: +low.toFixed(2),
+          weekHighLow52Position: +((close - low) / (high - low)).toFixed(3),
+          analystBuy: goodSet ? 8 + (seed % 10) : 3 + (seed % 5),
+          analystHold: 4 + (seed % 8),
+          analystSell: goodSet ? seed % 3 : 3 + (seed % 6),
+        };
       },
     });
   }

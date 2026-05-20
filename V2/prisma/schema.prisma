@@ -25,6 +25,10 @@ enum AgentKind {
   risk_auditor
   devils_advocate
   critic
+  /// Universe-wide stock-discovery agent. Runs weekly (manual trigger today;
+  /// cron pluggable). Outputs WatchlistProposal rows for operator approval
+  /// — does NOT modify the live watchlist directly.
+  scout
 }
 
 model Agent {
@@ -617,4 +621,57 @@ model StrategyConfig {
   createdAt         DateTime      @default(now())
 
   @@index([createdAt])
+}
+
+// ============================================================================
+// WatchlistProposal — outputs of the growthScout agent. Operator-gated:
+// proposals enter as `proposed`, become `approved` (which writes a new
+// StrategyConfig row appending the symbol) or `rejected` (with reason).
+// Append-only: rejected/superseded proposals stay in the table for audit so
+// you can see "the scout suggested AMD three weeks ago, I rejected it, here's
+// why" instead of having it silently re-propose every week.
+// ============================================================================
+
+enum WatchlistProposalStatus {
+  proposed
+  approved
+  rejected
+  /// Set when a later discovery run reproposes the same symbol; the older
+  /// row gets superseded and the newer row supersedes it. Keeps the table
+  /// honest about which version of the thesis you're acting on.
+  superseded
+}
+
+model WatchlistProposal {
+  id              String                  @id @default(uuid())
+  symbol          String
+  status          WatchlistProposalStatus  @default(proposed)
+  /// 'growthScout' for agent-discovered, 'manual' for operator-added (rare).
+  proposedBy      String
+  /// Set when the scout agent produced this proposal — links to its AgentRun
+  /// for full audit (rendered prompt, raw response, parsed output, cost).
+  agentRunId      String?
+  /// Cached LLM viability score 0..1.
+  viabilityScore  Float?
+  /// Compact growth thesis from the agent for at-a-glance review.
+  thesis          String?
+  /// Structured concerns the agent surfaced.
+  concerns        String[]               @default([])
+  /// Cached LLM rationale (multi-line) for the audit detail view.
+  rationale       String[]               @default([])
+  /// Quant snapshot at proposal time: ADV, last close, 1d / 5d / 30d return,
+  /// market cap, P/E if available. Lets the audit page show what the screener
+  /// + scout saw without re-fetching.
+  quantSnapshot   Json?
+  proposedAt      DateTime               @default(now())
+  /// Set when status moves to 'approved' or 'rejected'.
+  decidedAt       DateTime?
+  decidedBy       String?
+  rejectedReason  String?
+  /// When status='superseded', points at the newer proposal that replaced this one.
+  supersededById  String?
+
+  @@index([status, proposedAt])
+  @@index([symbol, status])
+  @@index([agentRunId])
 }

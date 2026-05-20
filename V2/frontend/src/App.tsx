@@ -10,6 +10,7 @@ import Audit from './routes/Audit';
 import Trades from './routes/Trades';
 import Wallet from './routes/Wallet';
 import Feeds from './routes/Feeds';
+import Watchlist from './routes/Watchlist';
 import Settings from './routes/Settings';
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="trades" element={<Trades />} />
         <Route path="wallet" element={<Wallet />} />
         <Route path="feeds" element={<Feeds />} />
+        <Route path="watchlist" element={<Watchlist />} />
         <Route path="audit" element={<Audit />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

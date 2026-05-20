@@ -12,6 +12,7 @@ dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { outputContractFor } from '../backend/src/schemas/agent-outputs';
+import { GROWTH_SCOUT_PROMPT_V_0_1_0 } from '../backend/src/prompts/growthScout.v0.1.0';
 
 if (!process.env.DATABASE_URL) {
   // eslint-disable-next-line no-console
@@ -96,7 +97,7 @@ Every conclusion must be traceable to observable evidence.`;
 interface SeedAgent {
   name: string;
   displayName: string;
-  kind: 'specialist' | 'head_trader' | 'risk_auditor' | 'devils_advocate' | 'critic';
+  kind: 'specialist' | 'head_trader' | 'risk_auditor' | 'devils_advocate' | 'critic' | 'scout';
   role: string;
   description: string;
   metadata: {
@@ -299,6 +300,28 @@ const AGENTS: SeedAgent[] = [
       extras: [{ key: 'lessons', description: 'list of structured lessons learned' }],
     },
     initialPrompt: { version: '0.1.0', directiveTemplate: criticPrompt() },
+  },
+  {
+    name: 'growthScout',
+    displayName: 'Growth Scout',
+    kind: 'scout',
+    role: 'Universe-wide stock discovery — surfaces watchlist candidates for operator approval.',
+    description:
+      'Runs OUTSIDE the daily trading cycle (weekly cadence, manual /api/watchlist/discover trigger). Receives quant snapshot + fundamentals per candidate. Emits WatchlistProposal rows that an operator approves or rejects through the UI. Never modifies the live watchlist directly.',
+    metadata: {
+      inputs: ['Alpaca snapshot', 'Finnhub fundamentals', 'Existing watchlist (exclusion)'],
+      extras: [
+        { key: 'viabilityScore', description: '0..1 — overall growth-viability call' },
+        { key: 'growthThesis', description: 'one-paragraph thesis' },
+        { key: 'concerns', description: 'evidence-based concerns array' },
+        { key: 'recommendForWatchlist', description: 'binary recommendation (≥0.65 score required)' },
+      ],
+    },
+    initialPrompt: {
+      version: '0.1.0',
+      directiveTemplate: GROWTH_SCOUT_PROMPT_V_0_1_0,
+      changelog: 'Initial scout prompt — quant + fundamentals interpretation, evidence-standard rationale.',
+    },
   },
 ];
 

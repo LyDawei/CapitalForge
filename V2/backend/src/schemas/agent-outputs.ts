@@ -103,6 +103,23 @@ export const CriticSchema = z
   .passthrough();
 
 // ---------------------------------------------------------------------------
+// growthScout — universe-wide stock discovery agent. Receives one symbol's
+// worth of quant snapshot + fundamentals, outputs a viability call with
+// thesis, concerns, and a binary recommendation. The runner persists
+// recommend=true rows as WatchlistProposal.
+// ---------------------------------------------------------------------------
+export const GrowthScoutSchema = z
+  .object({
+    symbol: z.string().min(1).max(10),
+    viabilityScore: z.number().min(0).max(1),
+    growthThesis: z.string().min(20),
+    concerns: z.array(z.string()).default([]),
+    recommendForWatchlist: z.boolean(),
+    rationale: z.array(z.string()).min(2),
+  })
+  .passthrough();
+
+// ---------------------------------------------------------------------------
 // Agent → schema lookup. Used by the runner and by the preview endpoint.
 // ---------------------------------------------------------------------------
 const SCHEMAS: Record<string, z.ZodTypeAny> = {
@@ -118,6 +135,7 @@ const SCHEMAS: Record<string, z.ZodTypeAny> = {
   riskAuditor: RiskAuditorSchema,
   devilsAdvocate: DevilsAdvocateSchema,
   critic: CriticSchema,
+  growthScout: GrowthScoutSchema,
 };
 
 export function schemaFor(agentName: string): z.ZodTypeAny | null {
@@ -336,6 +354,19 @@ const CRITIC_CONTRACT = `REQUIRED OUTPUT — JSON only:
   "tags": ["<structured tag>", "..."]
 }`;
 
+const GROWTH_SCOUT_CONTRACT = `REQUIRED OUTPUT — JSON only:
+{
+  "symbol": "<ticker — must match the symbol provided in the prompt>",
+  "viabilityScore": <0..1 — your overall growth-viability call>,
+  "growthThesis": "<1-3 sentences: what makes this name interesting for swing-trading growth exposure>",
+  "concerns": ["<concrete concern grounded in the data>", "..."],
+  "recommendForWatchlist": <true | false — only true if viabilityScore >= 0.65 AND no veto-level concerns>,
+  "rationale": [
+    "<evidence-based observation 1 citing specific metric values>",
+    "<evidence-based observation 2 citing specific metric values>"
+  ]
+}`;
+
 const CONTRACTS: Record<string, string> = {
   trendRegime: TREND_REGIME_CONTRACT,
   setupPattern: SETUP_PATTERN_CONTRACT,
@@ -349,6 +380,7 @@ const CONTRACTS: Record<string, string> = {
   riskAuditor: RISK_AUDITOR_CONTRACT,
   devilsAdvocate: DEVILS_ADVOCATE_CONTRACT,
   critic: CRITIC_CONTRACT,
+  growthScout: GROWTH_SCOUT_CONTRACT,
 };
 
 export function outputContractFor(agentName: string): string {

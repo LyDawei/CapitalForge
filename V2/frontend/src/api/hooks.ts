@@ -383,3 +383,32 @@ export const useFeedSourceSummary = () =>
     queryKey: ['feed-source-summary'],
     queryFn: () => api<FeedSourceSummary[]>('/api/feeds/sources/summary'),
   });
+
+// ---- Watchlist proposals ----
+export type WatchlistProposalStatus = 'proposed' | 'approved' | 'rejected' | 'superseded';
+export interface WatchlistProposal {
+  id: string;
+  symbol: string;
+  status: WatchlistProposalStatus;
+  proposedBy: string;
+  agentRunId: string | null;
+  viabilityScore: number | null;
+  thesis: string | null;
+  concerns: string[];
+  rationale: string[];
+  quantSnapshot: any;
+  proposedAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  rejectedReason: string | null;
+  supersededById: string | null;
+}
+
+export const useWatchlistProposals = (status?: WatchlistProposalStatus, limit = 100) =>
+  useQuery({
+    queryKey: ['watchlist-proposals', status, limit],
+    queryFn: () =>
+      api<{ proposals: WatchlistProposal[]; total: number; limit: number; offset: number }>(
+        `/api/watchlist/proposals?${status ? `status=${status}&` : ''}limit=${limit}`,
+      ),
+  });
