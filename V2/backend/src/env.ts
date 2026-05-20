@@ -22,10 +22,18 @@ const EnvSchema = z.object({
   ALPACA_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(180),
 
   LLM_PROVIDER: z.enum(['openai', 'anthropic', 'mock']).default('mock'),
+  /// Default = head trader's model. The synthesis step gets the premium tier.
   LLM_MODEL: z.string().default('gpt-4o'),
+  /// Cheaper model for specialists + audit agents + critic. Defaults to
+  /// gpt-4o-mini for ~6× cost reduction on the pattern-recognition tier.
+  /// Set both to the same value if you want everything on one model.
+  LLM_MODEL_SPECIALIST: z.string().default('gpt-4o-mini'),
   LLM_TEMPERATURE: z.coerce.number().default(0.2),
   OPENAI_API_KEY: z.string().default(''),
   ANTHROPIC_API_KEY: z.string().default(''),
+  /// Soft cap for the in-process token bucket on the LLM adapter. OpenAI's
+  /// default tier-1 rate limit is 500 requests/min; we leave headroom.
+  LLM_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(300),
 
   /// FRED — Federal Reserve Economic Data. Free, registration only at
   /// https://fred.stlouisfed.org/docs/api/api_key.html. Powers macroContext.

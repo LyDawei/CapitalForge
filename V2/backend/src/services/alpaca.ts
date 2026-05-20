@@ -67,6 +67,13 @@ export interface AlpacaService {
   /** Bars strictly AFTER the given date — used by trade-outcome settler. */
   getBarsAfter(symbol: string, afterDate: string, count: number): Promise<DailyBar[]>;
   /**
+   * The most recent `limit` bars whose date is ≤ `beforeDate`. Powers
+   * historical backfill — for a cycle dated 2026-01-15, the agent reads
+   * bars from 2025-X..2026-01-15, NOT today's bars. When beforeDate is
+   * today (or future), behavior is equivalent to getDailyBars.
+   */
+  getDailyBarsBefore(symbol: string, beforeDate: string, limit: number): Promise<DailyBar[]>;
+  /**
    * Recent news for a symbol, with audit-trail metadata wrapper. Up to
    * `daysBack` days of articles (capped at the Alpaca free tier's effective
    * limit of ~50 per response).
@@ -105,6 +112,13 @@ class MockAlpacaService implements AlpacaService {
     const start = new Date(afterDate);
     start.setDate(start.getDate() + 1);
     return generateBars(symbol, start, count);
+  }
+  async getDailyBarsBefore(symbol: string, beforeDate: string, limit: number): Promise<DailyBar[]> {
+    // Walk backward from beforeDate. The existing generateBars helper already
+    // does this: it iterates backward from the anchor date, skipping weekends,
+    // until it has `count` bars. For historical backfill that's exactly what
+    // we want — anchor on the cycle date, accumulate trailing N bars.
+    return generateBars(symbol, new Date(beforeDate), limit);
   }
   async getNews(symbol: string, daysBack: number) {
     return fetchWithAudit<AlpacaNewsArticle[]>({

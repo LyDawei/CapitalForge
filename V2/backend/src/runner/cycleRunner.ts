@@ -13,6 +13,7 @@ import {
   type FeedBundle,
 } from './agentFeeds';
 import { recordConsumption } from '../services/feedLog';
+import { env } from '../env';
 
 // ---------------------------------------------------------------------------
 // Specialist names — must match what's seeded in the Agent table.
@@ -86,9 +87,12 @@ export async function runCycle(symbol: string, date: string): Promise<CycleResul
 
   // 2. Fetch bars + compute technicals
   // Need 200+ bars so SMA200 is real, not null. Going to 220 to absorb any
-  // weekend/holiday gaps the mock might introduce.
+  // weekend/holiday gaps. CRITICAL for backfill: use `date` as the anchor so
+  // a historical cycle dated 2026-01-15 sees the 220 bars ending on
+  // 2026-01-15, not the 220 most-recent bars from today. When `date` is
+  // today/future the behavior is equivalent to getDailyBars.
   const alpaca = getAlpacaService();
-  const bars = await alpaca.getDailyBars(symbol, 220);
+  const bars = await alpaca.getDailyBarsBefore(symbol, date, 220);
   const tech = computeTechnicals(symbol, bars);
 
   // 3. Create or upsert Cycle row
@@ -340,6 +344,9 @@ async function runSpecialist(
     inputPayload: { technicals: tech, feedFetchIds: feeds?.feedFetchIds ?? [] },
     validate: (raw) => validateAgentOutput(name, raw),
     runKind: variant,
+    // Specialists + audit agents use the cheaper tier (env.LLM_MODEL_SPECIALIST,
+    // default gpt-4o-mini). Head trader is sized separately below.
+    model: env.LLM_MODEL_SPECIALIST,
   });
 
   // Audit trail: record that this agent run consumed each feed pull. The
@@ -455,6 +462,9 @@ async function runHeadTrader(
     },
     validate: (raw) => validateAgentOutput('headTrader', raw),
     runKind: variant,
+    // Head trader gets the premium tier (env.LLM_MODEL, default gpt-4o).
+    // This is the synthesis step where the cost premium pays off.
+    model: env.LLM_MODEL,
   });
 }
 
@@ -490,6 +500,9 @@ async function runAuditAgent(
     inputPayload: { headTraderPlan: headTraderResult?.parsed, technicals: tech },
     validate: (raw) => validateAgentOutput(name, raw),
     runKind: variant,
+    // Audit agents use the cheaper specialist tier — they're pattern checkers,
+    // not synthesizers.
+    model: env.LLM_MODEL_SPECIALIST,
   });
 
   // If this is a riskAuditor or devilsAdvocate with extras, persist as Critique

@@ -27,6 +27,12 @@ export interface RunAgentArgs {
   inputPayload: Record<string, unknown>;
   validate: (raw: string) => { ok: true; data: any } | { ok: false; error: string };
   runKind?: string;
+  /// Override the LLM model for THIS call. Caller decides — typically:
+  ///   - env.LLM_MODEL (head trader, premium tier)
+  ///   - env.LLM_MODEL_SPECIALIST (specialists / audit / critic, cheaper tier)
+  /// Defaults to env.LLM_MODEL when omitted so the legacy single-model setup
+  /// keeps working without changes.
+  model?: string;
 }
 
 export interface AgentRunResult {
@@ -50,7 +56,7 @@ export async function runAgent(args: RunAgentArgs): Promise<AgentRunResult> {
   const completion = await llm.complete({
     prompt: args.renderedPrompt,
     systemPrompt: args.basePrompt?.template,
-    model: env.LLM_MODEL,
+    model: args.model ?? env.LLM_MODEL,
     temperature: env.LLM_TEMPERATURE,
   });
 

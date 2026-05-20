@@ -14,7 +14,8 @@
     "prisma:studio": "prisma studio --config prisma.config.ts",
     "prisma:seed": "tsx ../prisma/seed.ts",
     "run-cycle": "tsx ../scripts/run-cycle.ts",
-    "seed-cycles": "tsx ../scripts/seed-cycles.ts"
+    "seed-cycles": "tsx ../scripts/seed-cycles.ts",
+    "backfill": "tsx ../scripts/backfill.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

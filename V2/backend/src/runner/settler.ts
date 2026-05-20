@@ -3,6 +3,7 @@ import { getAlpacaService } from '../services/alpaca';
 import { bookTradeSettlement } from '../services/wallet';
 import { runAgent } from './agentRunner';
 import { validateAgentOutput } from '../schemas/agent-outputs';
+import { env } from '../env';
 
 /**
  * Settles proposed TradePlans that haven't been settled yet. Walks each plan
@@ -264,6 +265,9 @@ async function runCriticForPlan(
     promptVersionId: ctx.promptVersionId,
     basePrompt: ctx.basePrompt,
     cycleId: plan.cycleId,
+    // Critic uses the cheaper specialist tier — it's post-hoc analysis, not
+    // synthesis. Same model as the audit agents.
+    model: env.LLM_MODEL_SPECIALIST,
     renderedPrompt,
     inputPayload: { reasoningTrace, plan: planSummary, outcome },
     validate: (raw) => validateAgentOutput('critic', raw),

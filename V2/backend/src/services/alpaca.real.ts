@@ -127,6 +127,20 @@ export class RealAlpacaService implements AlpacaService {
     return this.fetchBars(symbol, ymd(start), ymd(end), limit);
   }
 
+  async getDailyBarsBefore(symbol: string, beforeDate: string, limit: number): Promise<DailyBar[]> {
+    // Anchor on beforeDate; walk back as many calendar days as needed to
+    // collect `limit` trading days. Same buffer math as getDailyBars.
+    const end = new Date(beforeDate);
+    // Snap forward past weekends if beforeDate itself is Sat/Sun so the
+    // Alpaca endpoint's [start, end] window includes the prior weekday close.
+    while (end.getUTCDay() === 0 || end.getUTCDay() === 6) {
+      end.setUTCDate(end.getUTCDate() - 1);
+    }
+    const start = new Date(end);
+    start.setUTCDate(start.getUTCDate() - Math.ceil(limit * 1.6) - 10);
+    return this.fetchBars(symbol, ymd(start), ymd(end), limit);
+  }
+
   async getBarsAfter(symbol: string, afterDate: string, count: number): Promise<DailyBar[]> {
     // Strictly AFTER the cycle date — start one day past it.
     const start = new Date(afterDate);
