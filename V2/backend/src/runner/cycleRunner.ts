@@ -5,6 +5,7 @@ import { runAgent, type AgentRunResult } from './agentRunner';
 import { getStrategyPreset } from '../config/presets';
 import { validateAgentOutput } from '../schemas/agent-outputs';
 import { getBalance as getWalletBalance } from '../services/wallet';
+import { settleProposedPlans } from './settler';
 
 // ---------------------------------------------------------------------------
 // Specialist names — must match what's seeded in the Agent table.
@@ -41,6 +42,24 @@ export interface CycleResult {
 // ---------------------------------------------------------------------------
 export async function runCycle(symbol: string, date: string): Promise<CycleResult> {
   const cycleStart = Date.now();
+
+  // 0. Settle any plans whose stop/target/time-stop has hit since the last
+  //    cycle. Runs BEFORE we read the wallet balance for sizing so realized
+  //    P&L flows into capital first, and BEFORE we generate today's plan so
+  //    the critic has fired on the prior plan's outcome before we ask the
+  //    head trader to think about the next one. Best-effort: a settler
+  //    failure logs and continues; the cycle isn't blocked by an audit-only
+  //    side effect.
+  try {
+    const settled = await settleProposedPlans();
+    if (settled > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[cycle ${symbol}@${date}] settled ${settled} prior plan(s)`);
+    }
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.warn(`[cycle ${symbol}@${date}] pre-cycle settler failed: ${err.message}`);
+  }
 
   // 1. Load live config — risk + strategy + active base prompt + wallet balance.
   //    The wallet is the single source of truth for available capital;

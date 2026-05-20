@@ -38,7 +38,8 @@ export async function settleProposedPlans(): Promise<number> {
   let settled = 0;
 
   for (const plan of plans) {
-    const bars = await alpaca.getBarsAfter(plan.symbol, plan.cycle.date, plan.timeStopBars ?? 10);
+    const timeStopBars = plan.timeStopBars ?? 10;
+    const bars = await alpaca.getBarsAfter(plan.symbol, plan.cycle.date, timeStopBars);
     if (bars.length === 0) continue;
 
     let closeReason: string | null = null;
@@ -102,8 +103,13 @@ export async function settleProposedPlans(): Promise<number> {
       }
     }
 
-    // Time stop — if no target or stop was hit
+    // Time stop — only if the plan has actually held for its configured
+    // number of bars. If fewer bars have accumulated since the cycle date
+    // and neither stop nor target hit, the plan stays proposed for the next
+    // settler pass. Without this guard, auto-firing the settler the day
+    // after a plan was emitted would prematurely close it after one bar.
     if (!closeReason) {
+      if (bars.length < timeStopBars) continue;
       closeReason = 'time_stop';
       exitPrice = bars[bars.length - 1]!.close;
       heldBars = bars.length;
