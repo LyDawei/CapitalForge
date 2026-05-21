@@ -61,11 +61,15 @@ export const HeadTraderSchema = z
     action: z.enum(['BUY', 'SELL', 'HOLD', 'CLOSE']),
     conviction: z.number().min(0).max(1),
     setupName: z.string().nullable().optional(),
-    entry: z.number().optional(),
+    /// Nullable for HOLD actions where there's no entry to commit to —
+    /// the runner falls back to tech.close when null/undefined. Real
+    /// OpenAI returns null here for HOLD; Zod needs nullable() not just
+    /// optional() to accept that.
+    entry: z.number().nullable().optional(),
     stop: z.number().nullable().optional(),
     target1: z.number().nullable().optional(),
     target2: z.number().nullable().optional(),
-    riskPctOfEquity: z.number().min(0).optional(),
+    riskPctOfEquity: z.number().min(0).nullable().optional(),
     timeStopBars: z.number().int().nullable().optional(),
     expectedRMultiple: z.number().optional(),
     invalidationCriteria: z.array(z.string()).optional(),
