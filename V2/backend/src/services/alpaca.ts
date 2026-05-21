@@ -80,6 +80,55 @@ export interface AlpacaSnapshot {
   prevClose?: number;
 }
 
+/**
+ * Account snapshot from /v2/account. Read-only — V2 never writes to the
+ * trading API (Phase B carve-out). Surfaces equity, cash, buying power,
+ * and unrealized P&L so the dashboard can show "where the brokerage
+ * account stands right now" alongside V2's internal wallet ledger.
+ */
+export interface AlpacaAccount {
+  status: string;
+  cash: number;
+  equity: number;
+  buyingPower: number;
+  portfolioValue: number;
+  longMarketValue: number;
+  shortMarketValue: number;
+  unrealizedPl: number;
+  patternDayTrader: boolean;
+  createdAt: string;
+}
+
+/**
+ * Position snapshot from /v2/positions. Read-only.
+ */
+export interface AlpacaPosition {
+  symbol: string;
+  side: 'long' | 'short';
+  qty: number;
+  avgEntryPrice: number;
+  currentPrice: number;
+  marketValue: number;
+  costBasis: number;
+  unrealizedPl: number;
+  unrealizedPlPct: number;
+}
+
+/**
+ * Order snapshot from /v2/orders. Read-only. Mapped to V2 conventions.
+ */
+export interface AlpacaOrderSummary {
+  id: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  qty: number;
+  filledQty: number;
+  filledAvgPrice: number | null;
+  status: string;
+  createdAt: string;
+  filledAt: string | null;
+}
+
 export interface AlpacaService {
   getDailyBars(symbol: string, limit: number): Promise<DailyBar[]>;
   getCurrentPrice(symbol: string): Promise<number>;
@@ -128,6 +177,18 @@ export interface AlpacaService {
    * through here so it only burns ~100 API calls to cover 10k names.
    */
   getSnapshots(symbols: string[]): Promise<FetchWithAuditResult<AlpacaSnapshot[]>>;
+  /**
+   * READ-ONLY brokerage account state — equity, cash, buying power, etc.
+   * Surfaced on the dashboard so V2's internal wallet ledger and the actual
+   * Alpaca paper-account state are both visible side-by-side. These reads
+   * do NOT go through the FeedFetch audit table — they're dashboard data,
+   * not agent inputs, so logging every UI refresh would just be noise.
+   */
+  getAccount(): Promise<AlpacaAccount>;
+  /** READ-ONLY current open positions. */
+  getPositions(): Promise<AlpacaPosition[]>;
+  /** READ-ONLY recent orders, newest first. Default limit 20. */
+  getRecentOrders(limit?: number): Promise<AlpacaOrderSummary[]>;
 }
 
 /**
@@ -305,6 +366,29 @@ class MockAlpacaService implements AlpacaService {
         });
       },
     });
+  }
+
+  // Account / positions / orders — mock returns synthetic data so the dev
+  // dashboard has something to render before real keys are wired.
+  async getAccount(): Promise<AlpacaAccount> {
+    return {
+      status: 'ACTIVE',
+      cash: 100_000,
+      equity: 100_000,
+      buyingPower: 200_000,
+      portfolioValue: 100_000,
+      longMarketValue: 0,
+      shortMarketValue: 0,
+      unrealizedPl: 0,
+      patternDayTrader: false,
+      createdAt: new Date().toISOString(),
+    };
+  }
+  async getPositions(): Promise<AlpacaPosition[]> {
+    return [];
+  }
+  async getRecentOrders(): Promise<AlpacaOrderSummary[]> {
+    return [];
   }
 }
 

@@ -412,3 +412,55 @@ export const useWatchlistProposals = (status?: WatchlistProposalStatus, limit = 
         `/api/watchlist/proposals?${status ? `status=${status}&` : ''}limit=${limit}`,
       ),
   });
+
+// ---- Alpaca live account ----
+export interface AlpacaAccount {
+  status: string;
+  cash: number;
+  equity: number;
+  buyingPower: number;
+  portfolioValue: number;
+  longMarketValue: number;
+  shortMarketValue: number;
+  unrealizedPl: number;
+  patternDayTrader: boolean;
+  createdAt: string;
+}
+export interface AlpacaPosition {
+  symbol: string;
+  side: 'long' | 'short';
+  qty: number;
+  avgEntryPrice: number;
+  currentPrice: number;
+  marketValue: number;
+  costBasis: number;
+  unrealizedPl: number;
+  unrealizedPlPct: number;
+}
+export interface AlpacaOrderSummary {
+  id: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  qty: number;
+  filledQty: number;
+  filledAvgPrice: number | null;
+  status: string;
+  createdAt: string;
+  filledAt: string | null;
+}
+export interface AlpacaAccountSummary {
+  account: AlpacaAccount | null;
+  positions: AlpacaPosition[];
+  orders: AlpacaOrderSummary[];
+  errors: Array<{ kind: string; message: string }>;
+}
+
+export const useAlpacaAccountSummary = () =>
+  useQuery({
+    queryKey: ['alpaca-account-summary'],
+    queryFn: () => api<AlpacaAccountSummary>('/api/alpaca/account-summary'),
+    // 30-second cache — UI refreshes happen often but Alpaca account state
+    // doesn't change every few seconds; the brokerage API isn't real-time.
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });

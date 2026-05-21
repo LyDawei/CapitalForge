@@ -14,8 +14,11 @@
  *   - All bars normalized to the V2 DailyBar shape (date = YYYY-MM-DD)
  */
 import type {
+  AlpacaAccount,
   AlpacaAssetInfo,
   AlpacaNewsArticle,
+  AlpacaOrderSummary,
+  AlpacaPosition,
   AlpacaQuote,
   AlpacaService,
   AlpacaSnapshot,
@@ -372,6 +375,76 @@ export class RealAlpacaService implements AlpacaService {
         });
       },
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Trading API reads — account / positions / orders.
+  //
+  // These are READ-ONLY and live on the trading host (paper-api.alpaca.markets),
+  // not the data host. We hand-roll the request rather than going through
+  // `request()` because (a) they don't use the data-API rate limit pool and
+  // (b) they're dashboard data, not agent inputs — so we intentionally do NOT
+  // wrap them in fetchWithAudit. The FeedFetch audit table is for "what data
+  // did the agents see when deciding"; account refreshes don't qualify.
+  // -------------------------------------------------------------------------
+  private get tradingBase(): string {
+    return process.env.ALPACA_BASE_URL ?? 'https://paper-api.alpaca.markets';
+  }
+
+  private async tradingGet<T>(path: string): Promise<T> {
+    await this.limiter.take();
+    const res = await fetch(`${this.tradingBase}${path}`, { method: 'GET', headers: this.headers });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Alpaca trading ${res.status}: ${body || res.statusText}`);
+    }
+    return (await res.json()) as T;
+  }
+
+  async getAccount(): Promise<AlpacaAccount> {
+    const a = await this.tradingGet<any>('/v2/account');
+    return {
+      status: a.status,
+      cash: Number(a.cash),
+      equity: Number(a.equity),
+      buyingPower: Number(a.buying_power),
+      portfolioValue: Number(a.portfolio_value),
+      longMarketValue: Number(a.long_market_value),
+      shortMarketValue: Number(a.short_market_value),
+      unrealizedPl: Number(a.unrealized_pl ?? 0),
+      patternDayTrader: Boolean(a.pattern_day_trader),
+      createdAt: a.created_at,
+    };
+  }
+
+  async getPositions(): Promise<AlpacaPosition[]> {
+    const rows = await this.tradingGet<any[]>('/v2/positions');
+    return (rows ?? []).map((p) => ({
+      symbol: p.symbol,
+      side: p.side,
+      qty: Number(p.qty),
+      avgEntryPrice: Number(p.avg_entry_price),
+      currentPrice: Number(p.current_price ?? 0),
+      marketValue: Number(p.market_value ?? 0),
+      costBasis: Number(p.cost_basis ?? 0),
+      unrealizedPl: Number(p.unrealized_pl ?? 0),
+      unrealizedPlPct: Number(p.unrealized_plpc ?? 0),
+    }));
+  }
+
+  async getRecentOrders(limit = 20): Promise<AlpacaOrderSummary[]> {
+    const rows = await this.tradingGet<any[]>(`/v2/orders?status=all&limit=${limit}&direction=desc`);
+    return (rows ?? []).map((o) => ({
+      id: o.id,
+      symbol: o.symbol,
+      side: o.side,
+      qty: Number(o.qty),
+      filledQty: Number(o.filled_qty ?? 0),
+      filledAvgPrice: o.filled_avg_price != null ? Number(o.filled_avg_price) : null,
+      status: o.status,
+      createdAt: o.created_at,
+      filledAt: o.filled_at ?? null,
+    }));
   }
 
   /**
