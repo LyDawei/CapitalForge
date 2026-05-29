@@ -4,6 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
+> **⚠️ Active surface (May 2026): `V2/` at repo root, not `packages/`.** The
+> sections below describe the original `packages/` monorepo (V1 + an earlier
+> in-monorepo "V2 engine"). Current work has moved to a separate **Agent Audit
+> Console** under `V2/` — its own Prisma project, Fastify backend on :4000, Vite
+> UI on :4001, no Docker/Turborepo. See `V2/README.md` + `V2/TODO.md` for the
+> live picture and the dated "Last Worked On" entry below for where it stands.
+> The `packages/` tree still builds but is no longer the focus.
+
 CapitalForge is an AI-powered swing trading system. Two engine versions live side-by-side:
 
 - **V1 (legacy, scheduled for removal once V2 is validated)** — four LLM agents (momentum, mean reversion, confirmation, news/events) running in parallel; confidence-weighted aggregation with ±0.4 thresholds; fixed 20% position sizing.
@@ -23,7 +31,58 @@ Trades execute via Alpaca paper trading; the simulated wallet (`SandboxState`) i
 
 Append-only log of work sessions, **most recent first**. Each entry: what shipped, what's mid-flight, what's next. Update at the end of each working session so future Claude (and David) can resume without spelunking.
 
+### 2026-05-29 — orientation pass on the `V2/` Agent Audit Console
+
+No code shipped this session — verified where V2 actually stands after the
+5/20–5/21 commit batch (the entries below this one describe the superseded
+`packages/` V2 engine; the real work has lived in `V2/` since ~5/18). Source of
+truth for V2 is now `V2/TODO.md` + `V2/README.md`.
+
+**What the `V2/` console is now:** audit-first rewrite at repo root. 8 specialists
+(`trendRegime`, `setupPattern`, `momentum`, `meanReversion`, `volumeFlow`,
+`newsEvents`, + new `macroContext`, `liquiditySlippage`), `headTrader`, two
+adversarial reviewers (`riskAuditor`, `devilsAdvocate`), post-cycle `critic`, and
+a `growthScout` watchlist-proposal pipeline. Every LLM call recorded as an
+`AgentRun` (inputHash, promptVersion, model, latency, tokens, cost, rawResponse,
+parsedOutput, schemaValid). Real adapters live: OpenAI (`llm.openai.ts`,
+gpt-4o head trader / gpt-4o-mini specialists), real Alpaca data + NBBO + asset
+info + account/positions, Finnhub news/fundamentals, FRED macro — all with a
+`FeedFetch` audit trail. All four `V2/TODO.md` items shipped (JSON output
+contract, A/B shadow runs, real Alpaca data adapter Phase A, persistent wallet
+ledger).
+
+**Validation status — the headline.** A real-LLM backfill ran: 63 cycles,
+AAPL/NVDA/SPY × 21 trading days (2026-04-22 → 2026-05-20), gpt-4o, $4.24 spent,
+**0/756 schema failures** (the contract + OpenAI JSON path is rock solid). BUT
+**every one of the 63 cycles resolved to HOLD** (avg conviction 0.348), so:
+- **0 TradePlans → 0 TradeOutcomes → 0 critique-on-outcome data.**
+- The entire profitability / hit-rate / calibration apparatus has **no data to
+  chew on yet.** The central question the console exists to answer is still
+  unanswered — not because the plumbing is broken (it isn't), but because the
+  head trader never commits.
+- This kills the old "tune the mock technicals" theory (CLAUDE.md, 4/27): it's
+  HOLD-everything even on **real** data with **real** gpt-4o. The head trader is
+  conservative to a fault on calm large-caps over a quiet month.
+
+**Mid-flight / known gaps:**
+- Phase B (order execution, `submitOrder`) intentionally deferred behind the
+  `RUNNER_DRY_RUN` safety gate — but it's moot until cycles produce non-HOLD plans.
+- Shadow head-trader A/B can't settle TradePlan-level outcomes yet:
+  `TradePlan.cycleId` / `Deliberation.cycleId` are `@unique`, so only one plan
+  per cycle persists. Relaxing that touches 8+ files (carve-out noted in TODO #2).
+- Cosmetic bug: `cycleRunner.ts` hardcodes `Deliberation.modelName = 'mock-smart-1'`
+  even when the real gpt-4o adapter ran (the `AgentRun` row has the correct model).
+
+**Next — get the agents to actually decide something:**
+1. Diagnose the all-HOLD: read the headTrader v0.2.0 prompt + conviction gate.
+   Is the BUY bar too high, or are the specialist signals genuinely mid-range?
+2. Re-run a backfill over a **trending** window and/or **higher-beta** symbols so
+   there's real directional signal to commit on — then see if TradePlans appear.
+3. Only once outcomes accumulate do the downstream items (shadow-plan settlement,
+   Phase B execution) become meaningful. Fix the `modelName` cosmetic bug en route.
+
 ### 2026-04-27 — V2 engine + monorepo + UI dashboard, M0 → M3 + agent perf tracking
+*(superseded — describes the old `packages/`-monorepo V2 engine, not the `V2/` console)*
 
 **Shipped:**
 - Monorepo restructure: `packages/{shared,engine,api,ui}` with npm workspaces + Turborepo. V1 cron still runs.
