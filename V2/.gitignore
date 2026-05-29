@@ -10,3 +10,7 @@ coverage/
 .vite/
 prisma/migrations/dev.db*
 .prisma/
+
+# Postgres dumps (DB migration / backups — data, not source)
+*.dump
+*.sql.gz

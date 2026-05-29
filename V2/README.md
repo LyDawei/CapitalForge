@@ -8,6 +8,11 @@ Node, Postgres, and `npm`.
 > V2 is about *understanding* the agents that make them. Different goal, cleaner
 > schema, no legacy baggage.
 
+> **Postgres runs in Docker** (`docker compose up -d` — see `docker-compose.yml`).
+> The backend and frontend still run locally via `npm run dev`; only the database
+> is containerized, so data lives in the managed `cf_v2_pgdata` volume instead of a
+> local Postgres install. The container owns host port 5432.
+
 ---
 
 ## Stack
@@ -20,7 +25,7 @@ Node, Postgres, and `npm`.
 | Market data | Alpaca (paper) — reused from V1                                | —    |
 | LLM         | OpenAI / Anthropic (provider-agnostic adapter)                 | —    |
 
-No Docker. No Turborepo. Just `npm` workspaces.
+Postgres in Docker (DB only). No Turborepo. Just `npm` workspaces for the app.
 
 ---
 
@@ -114,6 +119,7 @@ overweighted. Those critiques are queryable and feed prompt iteration.
 # from V2/
 npm install
 cp .env.example .env                                 # fill in DATABASE_URL, ALPACA_*, LLM_*
+docker compose up -d                                 # start Postgres (container owns :5432)
 npm run prisma:migrate -w @cf2/backend               # apply schema
 npm run prisma:seed -w @cf2/backend                  # seed agent registry + prompt versions
 npm run dev                                          # starts backend (:4000) + frontend (:4001)
