@@ -31,6 +31,52 @@ Trades execute via Alpaca paper trading; the simulated wallet (`SandboxState`) i
 
 Append-only log of work sessions, **most recent first**. Each entry: what shipped, what's mid-flight, what's next. Update at the end of each working session so future Claude (and David) can resume without spelunking.
 
+### 2026-05-29 — Postgres in Docker + headTrader v0.3.0 breaks the all-HOLD logjam
+
+**Shipped:**
+- **Postgres containerized** (`V2/docker-compose.yml`, DB-only — backend/frontend
+  still run locally). Migrated the existing DB off the local `postgresql-x64-16`
+  install into the `cf_v2_pgdata` volume via `pg_dump`/`pg_restore` with zero
+  data loss (63 cycles + 756 AgentRuns verified intact). Container owns host
+  port 5432, so `DATABASE_URL` is unchanged. Local service set to Manual startup.
+  `.env.example` creds aligned to `postgres/postgres`; README "No Docker" claims
+  corrected; `*.dump` gitignored. Commit `ca50bd6`.
+- **headTrader v0.3.0** (`backend/src/prompts/headTrader.v0.3.0.ts`, active).
+  Diagnosed the 100%-HOLD problem from the reasoning traces — it was three things,
+  not just timidity: (1) genuinely weak specialist signals on calm large-caps
+  (HOLD was often *right*); (2) a hard `conviction<0.5` binary with no small-size
+  path; (3) an empty-feed false veto — `liquiditySlippage` returned
+  `tradable=false @ confidence 0.00` on **AAPL** (a mega-cap) and that hard-vetoed
+  the cycle. v0.3.0: conviction floor 0.5→0.4 with a **0.40–0.50 quarter-size
+  starter tier**; no-thesis HOLD now needs absence of BOTH a setup AND directional
+  agreement (a pullback-in-uptrend counts); **discount any specialist veto/signal
+  at confidence <0.3** (kills the false veto from inside the head trader); trimmed
+  the anti-overtrading sermon. Hard safety vetoes kept. Commit `2be93d4`.
+
+**Validation (this is the headline):** funded the wallet $0→$2000 (it was empty —
+own blocker, since sizing = walletBalance × riskPct), flipped `strategyBias`
+`mean_reversion → trend_following` (right lens for momentum names), and ran a
+real-gpt-4o smoke backfill: **TSLA + AMD, 2026-04-22→05-20, 42 cycles, ~$2.50.**
+Result — **the all-HOLD logjam is broken.** 4 BUY plans (all AMD, conviction
+0.50–0.55, exactly the new starter tier), all settled `target1_hit` for +$101.34
+(wallet → $2101.34). The **TradePlan→TradeOutcome→wallet loop flowed data for the
+first time.** TSLA produced 0 trades (signals stayed sub-0.40).
+
+**Mid-flight / don't over-read:** 4 trades, **4/4 winners, all exactly ~1R
+target1_hit** — suspiciously clean and n=4. Mechanism validated; **profitability
+completely unproven.** Two things to be skeptical of: (a) 4/4 with no stop/time-stop
+hits smells like the settler's forward-walk may be structurally favorable (or AMD
+just trended up that month) — worth checking whether any stop was genuinely
+threatened; (b) n=4 says nothing — the `V2/TODO.md` promotion framework wants ~60
+directional samples / 100 trades before claiming an edge.
+
+**Next:** wider backfill (more names, longer window, both regimes) to get sample
+size up before believing any hit rate — bigger spend, separate decision. Then the
+deferred items become meaningful: shadow-plan settlement (the `TradePlan.cycleId`
+`@unique` refactor) and Phase B order execution behind `RUNNER_DRY_RUN`. Also still
+open: the `macroContext`-prose-in-`flags` leak and the cosmetic
+`Deliberation.modelName='mock-smart-1'` hardcode in `cycleRunner.ts`.
+
 ### 2026-05-29 — orientation pass on the `V2/` Agent Audit Console
 
 No code shipped this session — verified where V2 actually stands after the
