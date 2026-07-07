@@ -31,6 +31,7 @@ import { MACRO_CONTEXT_PROMPT_V_0_3_0 } from '../backend/src/prompts/macroContex
 import { LIQUIDITY_SLIPPAGE_PROMPT_V_0_3_0 } from '../backend/src/prompts/liquiditySlippage.v0.3.0';
 import { RISK_AUDITOR_PROMPT_V_0_3_0 } from '../backend/src/prompts/riskAuditor.v0.3.0';
 import { HEAD_TRADER_PROMPT_V_0_3_0 } from '../backend/src/prompts/headTrader.v0.3.0';
+import { HEAD_TRADER_PROMPT_V_0_4_0 } from '../backend/src/prompts/headTrader.v0.4.0';
 import { outputContractFor } from '../backend/src/schemas/agent-outputs';
 
 interface Upgrade {
@@ -67,6 +68,14 @@ const REGISTRY: Upgrade[] = [
   { agentName: 'liquiditySlippage', version: '0.3.0', directiveTemplate: LIQUIDITY_SLIPPAGE_PROMPT_V_0_3_0, changelog: 'v0.3.0: real NBBO quote (bid/ask/depth/age) + asset info (shortable/tradable/easyToBorrow) wired. Spread now read in actual bps. IEX free-tier delay acknowledged. Veto thresholds bind on real values.' },
   { agentName: 'riskAuditor',       version: '0.3.0', directiveTemplate: RISK_AUDITOR_PROMPT_V_0_3_0,       changelog: 'v0.3.0: explicit HOLD short-circuit (riskGrade=N/A, no objections) — first-real-LLM smoke caught the agent grading non-plans as F. Reworded invalidation kill rule to describe the concreteness standard without spelling out leak-prone example words.' },
   { agentName: 'headTrader',        version: '0.3.0', directiveTemplate: HEAD_TRADER_PROMPT_V_0_3_0,        changelog: 'v0.3.0: first-backfill came out 100% HOLD. Lower conviction floor 0.5->0.4 with a 0.40-0.50 quarter-size starter tier; reword setup-grade veto into a thesis test (directional agreement counts, named A/B pattern not required); discount any specialist veto/signal at confidence <0.3 (kills empty-feed false vetoes like liquiditySlippage tradable=false @0.00 conf on AAPL); trim anti-overtrading framing to one balanced line. Hard safety vetoes retained.' },
+
+  // v0.4.0 — pairs with cycleRunner change that now serializes the full
+  // specialist payload (bullishScore, confidence, flags, rationale, keyLevels,
+  // extras) into the head trader prompt. Prior versions referenced extras
+  // fields by name in their veto rules, but the runner was only sending
+  // (score, conf, flags) — the model couldn't actually read what it was being
+  // told to enforce.
+  { agentName: 'headTrader',        version: '0.4.0', directiveTemplate: HEAD_TRADER_PROMPT_V_0_4_0,        changelog: 'v0.4.0: INPUTS PROVIDED rewritten to describe the full JSON shape the runner now serializes (bullishScore, confidence, flags, rationale, keyLevels, extras with named per-specialist fields). New READ THIS FIRST directive: extras blocks are the authoritative signal; the (score, conf) pair is a summary. Decision logic / sizing / data-quality discount unchanged — this is a "feed the model what it needs to do what we already told it to do" patch, not a behavior change.' },
 ];
 
 function findUpgrade(agentName: string, version: string): Upgrade | undefined {

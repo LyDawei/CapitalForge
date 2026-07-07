@@ -11,10 +11,18 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+/// Like RequestInit, but body can be any value — the helper auto-encodes
+/// object bodies as JSON. Plain strings, Blobs, FormData, etc. pass through.
+type ApiInit = Omit<RequestInit, 'body'> & { body?: unknown };
+
+export async function api<T>(path: string, init?: ApiInit): Promise<T> {
+  const hasBody = init?.body !== undefined && init?.body !== null;
+  const { body, ...rest } = init ?? {};
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'content-type': 'application/json' },
-    ...init,
+    ...rest,
+    ...(hasBody
+      ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+      : {}),
   });
   if (!res.ok) {
     const raw = await res.text();

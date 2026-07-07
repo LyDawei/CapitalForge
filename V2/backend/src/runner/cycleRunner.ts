@@ -435,9 +435,19 @@ async function runHeadTrader(
     .filter(Boolean)
     .map((sr) => {
       const p = sr!.parsed ?? {};
-      return `[${sr!.agentName}] score=${p.bullishScore ?? '?'} conf=${p.confidence ?? '?'} flags=[${(p.flags ?? []).join(',')}]`;
+
+      const payload = {
+        bullishScore: p.bullishScore ?? null,
+        confidence: p.confidence ?? null,
+        flags: p.flags ?? [],
+        rationale: p.rationale ?? [],
+        keyLevels: p.keyLevels ?? null,
+        extras: p.extras ?? {}
+      };
+
+      return `[${sr!.agentName}]\n${JSON.stringify(payload, null, 2)}`;
     })
-    .join('\n');
+    .join('\n\n');
 
   // Inject strategy bias directive
   const biasPreset = getStrategyPreset(strategy.strategyBias);

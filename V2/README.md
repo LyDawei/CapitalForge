@@ -8,10 +8,15 @@ Node, Postgres, and `npm`.
 > V2 is about *understanding* the agents that make them. Different goal, cleaner
 > schema, no legacy baggage.
 
-> **Postgres runs in Docker** (`docker compose up -d` — see `docker-compose.yml`).
-> The backend and frontend still run locally via `npm run dev`; only the database
-> is containerized, so data lives in the managed `cf_v2_pgdata` volume instead of a
-> local Postgres install. The container owns host port 5432.
+> **Postgres runs in Docker** (`cd V2 && docker compose up -d postgres`). The
+> backend and frontend still run locally via `npm run dev`; only the database is
+> containerized, so data lives in the managed `cf_v2_pgdata` volume instead of a
+> local Postgres install. The container (`capitalforge-v2-db`) owns host port 5432.
+>
+> ⚠️ Run compose **from `V2/`**, not the repo root — the root `docker-compose.yml`
+> is the legacy `packages/` monorepo stack. Operational commands and a full
+> troubleshooting runbook (the "file cannot be accessed by the system" / WSL boot
+> failure and its fix) live in **[`DOCKER.md`](DOCKER.md)**.
 
 ---
 
@@ -166,3 +171,51 @@ V2 is read-only against the agent system by default. To populate it you can:
    agents, but every LLM call is recorded with full audit fields.
 
 Pick standalone while you're learning the pieces; switch later.
+
+---
+
+## Iterating on agent prompts
+
+Prompts are versioned in the DB (`PromptVersion`, one row per agent per version,
+exactly one `isActive`). The runner reads the active version at cycle time, so a
+new prompt only takes effect once it's **activated in the DB** — editing the
+`.ts` file is not enough.
+
+```bash
+# from V2/ — register + activate a new version (deactivates prior ones)
+npx tsx scripts/upgrade-prompt.ts headTrader 0.4.0
+npx tsx scripts/upgrade-prompt.ts all 0.2.0        # bump every agent at once
+
+# verify what's live
+docker exec capitalforge-v2-db psql -U postgres -d capitalforge_v2 -tA -c \
+  'select a.name, pv.version from "PromptVersion" pv join "Agent" a on a.id=pv."agentId" where pv."isActive";'
+```
+
+New prompt versions live in `backend/src/prompts/<agent>.v<x.y.z>.ts` and are
+wired into the `REGISTRY` array in `scripts/upgrade-prompt.ts`.
+
+> **Active head trader: v0.4.0.** Serializes the *full* specialist payload
+> (`bullishScore, confidence, flags, rationale, keyLevels, extras`) into the
+> prompt so the head trader can actually read the `extras.*` fields its veto /
+> conflict rules reference — earlier versions were told to enforce rules over data
+> the runner wasn't sending. Pairs with the matching change in
+> `backend/src/runner/cycleRunner.ts`.
+
+## Backfill (accumulate sample size)
+
+Runs cycles over a date range × symbol list so the audit pipeline gets real
+sample size in one batch. **Resumable** — skips `(date, symbol)` pairs that
+already have a completed `Cycle`, so a crash just picks up where it left off.
+
+```bash
+# from V2/ — real LLM (MODE=paper + OPENAI_API_KEY). ~$0.05–0.09 per cycle.
+npx tsx scripts/backfill.ts --symbols AMD,NVDA --start 2026-06-01 --end 2026-06-08
+npx tsx scripts/backfill.ts --symbols AMD,NVDA --start 2026-06-01 --end 2026-06-08 --dry-run
+```
+
+Cost scales with cycle count (8 specialists + head trader + reviewers + critic per
+cycle). Use `--dry-run` first to see the plan and how many pairs are already done.
+
+> **Known cosmetic bug:** `Deliberation.modelName` is hardcoded to `mock-smart-1`
+> even when real gpt-4o ran — the correct model is recorded on the `AgentRun` row.
+> Don't trust `Deliberation.modelName`; query `AgentRun.modelName`/`provider`.

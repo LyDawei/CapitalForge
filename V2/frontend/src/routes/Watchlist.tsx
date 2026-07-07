@@ -130,7 +130,7 @@ function ProposalCard({ p, onMutate }: { p: WatchlistProposal; onMutate: () => v
     try {
       await api(`/api/watchlist/proposals/${p.id}/approve`, {
         method: 'POST',
-        body: JSON.stringify({ approvedBy }),
+        body: { approvedBy },
       });
       onMutate();
     } catch (e: any) {

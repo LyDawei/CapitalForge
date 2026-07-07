@@ -31,6 +31,69 @@ Trades execute via Alpaca paper trading; the simulated wallet (`SandboxState`) i
 
 Append-only log of work sessions, **most recent first**. Each entry: what shipped, what's mid-flight, what's next. Update at the end of each working session so future Claude (and David) can resume without spelunking.
 
+> **Process rule (2026-07-07):** log this section **before every commit**, not just
+> at session end. No commit without a matching "Last Worked On" entry first.
+
+### 2026-07-07 — headTrader v0.4.0 activated + validated; Docker DB rescued; docs
+
+**Shipped:**
+- **headTrader v0.4.0 active** (`backend/src/prompts/headTrader.v0.4.0.ts` +
+  matching `cycleRunner.ts` change). The runner now serializes the **full**
+  specialist payload (`bullishScore, confidence, flags, rationale, keyLevels,
+  extras`) into the head-trader prompt instead of just `(score, conf, flags)`.
+  Prior versions' veto/conflict rules referenced `extras.*` fields the model
+  never received — the rules were unenforceable. v0.4.0's INPUTS/READ-THIS-FIRST
+  describe the JSON shape and name the key extras fields. Registered + activated
+  via `scripts/upgrade-prompt.ts headTrader 0.4.0` (verified `isActive`, priors
+  off). Decision logic/sizing unchanged — pure "feed the model what we already
+  told it to reason over."
+- **Validated on real gpt-4o.** Smoke backfill AMD+NVDA, 2026-06-01→06-08, 12
+  cycles, `gpt-4o-2024-08-06`, prompt v0.4.0, **12/12 schema-valid**, ~$0.09/cycle.
+  Confirmed the fix works: the head trader now **reasons over the extras by name**
+  (cites `extensionATR`, momentum exhaustion, volume accumulation, setup grade).
+  All 12 resolved HOLD — but *well-reasoned* HOLDs (bull trend vs. exhausted/
+  overbought/extended, no setup → correctly below the 0.40 floor), not the old
+  blind all-HOLD. DB now at 117 cycles.
+- **Secret hygiene:** scrubbed real FRED/FINNHUB keys out of tracked
+  `.env.example` (placeholders now; live keys stay in gitignored `V2/.env`). Never
+  committed, so not in history.
+- **Frontend:** `api()` helper now auto-encodes object bodies as JSON
+  (`client.ts`), callers simplified (`Watchlist.tsx`).
+- **Docs:** new `V2/DOCKER.md` (Postgres-in-Docker runbook + the socket/WSL boot-
+  failure troubleshooting, below) and refreshed `V2/README.md` (v0.4.0 state,
+  `upgrade-prompt` + `backfill` command docs, pointer to DOCKER.md).
+
+**The Docker saga (root-caused — see `V2/DOCKER.md`):** Docker Desktop refused to
+boot, cycling through *"initializing <service>: remove …`.sock`: The file cannot
+be accessed by the system"* (Win error 1920). Two compounding faults: (1) orphaned
+AF_UNIX sockets from unclean exits that **nothing** can delete — not `del`,
+`fsutil`, `\\?\`, `robocopy /MIR`, or even a full reboot — and Docker crashes on
+boot trying to `remove()` them, orphaning more; (2) a stuck `docker_data.vhdx`
+(`WSL_E_USER_VHD_ALREADY_ATTACHED`). The missing step every restart:
+**`wsl --shutdown`** (kills the VM + detaches the VHD — process-kills don't).
+Working recovery = quit Docker → `wsl --shutdown` → rename the canonical socket
+dirs so Docker recreates them fresh → boot fully without interrupting. Also bumped
+VM memory 2 GB→4 GB (the accidental repo-root monorepo `docker compose up` OOM'd
+buildkit and started the crash cascade — **run compose from `V2/`**).
+
+**Mid-flight / don't over-read:**
+- n=12, **all HOLD** — no BUY this window, so v0.4.0's *commit* path is
+  un-exercised under the new prompt (v0.3.0 already proved commit works). June
+  AMD/NVDA were uniformly extended/overbought; HOLD was arguably correct.
+- gpt-4o anchors HOLD conviction at **exactly 0.350** every cycle (reasoning
+  varies, the number doesn't) — conviction carries little info on HOLDs.
+- Cosmetic bug still open: `Deliberation.modelName='mock-smart-1'` hardcode in
+  `cycleRunner.ts` even when real gpt-4o ran (correct model is on `AgentRun`).
+
+**Next:**
+1. **BUY-seeking window** — backfill a clean pullback-in-uptrend period to confirm
+   v0.4.0 still commits (and that the extras feed doesn't over-suppress).
+2. **Wider backfill for sample size** — the standing item; more names, longer
+   window, both regimes, toward the ~60-sample bar before believing any hit rate.
+3. Fix the `mock-smart-1` cosmetic bug while next in `cycleRunner.ts`.
+4. Still deferred: shadow-plan settlement (`TradePlan.cycleId` `@unique` refactor)
+   and Phase B order execution behind `RUNNER_DRY_RUN`.
+
 ### 2026-05-29 — Postgres in Docker + headTrader v0.3.0 breaks the all-HOLD logjam
 
 **Shipped:**
