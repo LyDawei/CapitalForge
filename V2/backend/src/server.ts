@@ -7,6 +7,7 @@ import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-
 
 import { env } from './env';
 import { prisma } from './db';
+import { startScheduler, stopScheduler } from './runner/scheduler';
 import { registerHealthRoutes } from './routes/health';
 import { registerAgentRoutes } from './routes/agents';
 import { registerRunRoutes } from './routes/runs';
@@ -58,6 +59,7 @@ async function build() {
   await app.register(registerAlpacaRoutes, { prefix: '/api/alpaca' });
 
   app.addHook('onClose', async () => {
+    stopScheduler();
     await prisma.$disconnect();
   });
 
@@ -68,6 +70,7 @@ async function main() {
   const app = await build();
   await app.listen({ port: env.PORT, host: '0.0.0.0' });
   app.log.info(`API ready on http://localhost:${env.PORT} (docs: /docs)`);
+  startScheduler(app.log);
 }
 
 main().catch((err) => {

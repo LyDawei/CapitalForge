@@ -8,6 +8,7 @@ build/
 *.log
 coverage/
 .vite/
+*.tsbuildinfo
 prisma/migrations/dev.db*
 .prisma/
 

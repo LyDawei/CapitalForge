@@ -132,6 +132,10 @@ npm run dev                                          # starts backend (:4000) + 
 
 Open http://localhost:4001 — the dashboard lands first.
 
+**Deploying** (full containerized stack — DB + backend + frontend, with the
+daily scheduler): see **[DEPLOY.md](DEPLOY.md)**. TL;DR:
+`docker compose -f docker-compose.prod.yml up -d --build`.
+
 ---
 
 ## Layout

@@ -34,6 +34,65 @@ Append-only log of work sessions, **most recent first**. Each entry: what shippe
 > **Process rule (2026-07-07):** log this section **before every commit**, not just
 > at session end. No commit without a matching "Last Worked On" entry first.
 
+### 2026-07-07 (b) — deployability: in-process scheduler + full-stack containers + DEPLOY.md
+
+**Context:** groundwork for deploying V2 to a Pi5, **replacing** V1 (which
+already runs there via Docker Compose with a built-in cron). Goal: same
+`docker compose up` workflow David already knows.
+
+**Shipped:**
+- **In-process daily scheduler** (`backend/src/runner/scheduler.ts`, wired into
+  `server.ts`). Mirrors V1's built-in cron — no host crontab/systemd timer. On
+  fire it runs one cycle per symbol in the active strategy's watchlist
+  (`StrategyConfig.watchlist`, latest row) **sequentially** (shared wallet),
+  overlap-guarded. Gated by env: `ENABLE_SCHEDULER` (default false — dev/CI
+  never auto-fire paid cycles), `SCHEDULE_CRON` (default `30 16 * * 1-5`),
+  `SCHEDULE_TZ` (default `America/New_York`, so host locale is irrelevant), and
+  `RUNNER_DRY_RUN` (default true — forward-looking gate for Phase B order exec;
+  cycles are analysis-only today). New `envBool` helper in `env.ts` (avoids the
+  `z.coerce.boolean("false") === true` trap). Verified at runtime: armed /
+  disabled / invalid-cron paths all log correctly.
+- **Full-stack containerization** (Pi5 arm64-ready):
+  - `backend/Dockerfile` (+ `docker-entrypoint.sh` runs `prisma migrate deploy`
+    then `node dist/server.js`; dummy `DATABASE_URL` satisfies `prisma.config.ts`
+    during build since generate never connects).
+  - `frontend/Dockerfile` + `nginx.conf` — builds the SPA with an **empty**
+    `VITE_API_BASE_URL` (client keeps `""` because it uses `?? default`, only
+    nulls fall back) so `/api` calls are same-origin; nginx serves `dist/` and
+    proxies `/api`+`/docs` to `backend:4000`. One origin, no CORS.
+  - `docker-compose.prod.yml` — postgres + backend + frontend; reuses the
+    existing `v2_cf_v2_pgdata` volume; overrides `DATABASE_URL` to the in-network
+    host and defaults `ENABLE_SCHEDULER=true`. `.dockerignore` keeps host
+    `node_modules` (x86 binaries) out of the image.
+  - `node-cron` added to backend deps.
+- **Verified the whole stack end-to-end in containers** (on the Windows dev box,
+  amd64): built both images, brought the stack up against the real volume —
+  entrypoint migrated (no-op, 12 migrations present), API ready, scheduler armed
+  with real `.env`, nginx `:4001/api/health` proxied to the backend, 118 cycles
+  intact through the proxy. Then torn down and reverted to the dev DB-only stack
+  (didn't leave an armed scheduler running — it'd fire a paid cycle at 4:30pm ET).
+- **Docs:** new `V2/DEPLOY.md` (dev-vs-prod, Windows rehearsal, Pi5 cutover
+  replacing V1, `pg_dump`/`pg_restore` data migration, arm64 notes, day-2 ops,
+  scheduler); README "Getting started" points to it; `.env.example` documents
+  the scheduler vars.
+
+**Mid-flight / notes:**
+- Prod stack tested on amd64, **not yet on real arm64** — the Pi5 build is the
+  first true ARM exercise. Low risk: base images are multi-arch and Prisma's pg
+  driver adapter means no query-engine binary to port, but it's unproven metal.
+- Scheduler `runDailyCycle` core is the exact `runCycle` the validated backfill
+  uses, but a full scheduled fire (whole watchlist, real LLM spend) wasn't
+  triggered — only the arm/disable wiring was runtime-verified.
+- Backend image is ~1.3 GB (keeps devDeps so backfills/seeds/prompt-upgrades run
+  in-container). Fine for a Pi5+SSD; trim later if it matters.
+
+**Next:**
+1. Actually deploy on the Pi5 (build arm64, `pg_dump`→`pg_restore` the 118
+   cycles, cut over from V1). DEPLOY.md is the runbook.
+2. Standing validation items unchanged: BUY-seeking window to confirm v0.4.0
+   commits, then wider backfill for sample size.
+3. Still-open cosmetic: `Deliberation.modelName='mock-smart-1'` hardcode.
+
 ### 2026-07-07 — headTrader v0.4.0 activated + validated; Docker DB rescued; docs
 
 **Shipped:**
