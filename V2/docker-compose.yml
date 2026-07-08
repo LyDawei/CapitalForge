@@ -9,7 +9,7 @@
 #   docker compose down -v      # stop AND wipe the volume (destroys all cycles)
 #
 # Credentials + db name match V2/.env's DATABASE_URL:
-#   postgresql://postgres:postgres@localhost:5432/capitalforge_v2
+#   postgresql://postgres:<POSTGRES_PASSWORD>@localhost:5432/capitalforge_v2
 #
 # NOTE: host port 5432 must be free. If a local Postgres service is bound to
 # it, stop that service first (see README/handoff), or change the host side of
@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in V2/.env}
       POSTGRES_DB: capitalforge_v2
     ports:
       - "5432:5432"

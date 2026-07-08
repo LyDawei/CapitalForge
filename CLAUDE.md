@@ -34,6 +34,41 @@ Append-only log of work sessions, **most recent first**. Each entry: what shippe
 > **Process rule (2026-07-07):** log this section **before every commit**, not just
 > at session end. No commit without a matching "Last Worked On" entry first.
 
+### 2026-07-07 (c) — secret-scan follow-up: default Postgres password (false positive)
+
+**Trigger:** a secret-scan email (public repo) flagged `feature/V2` commit
+`467f666`, file `docker-compose.prod.yml`. **Diagnosis: false positive** — the
+match was the literal `postgres` in
+`postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@…` (default Postgres
+password, internal-network only, env-overridable). No real credential.
+
+**What I verified first (full git secret sweep):** OpenAI + Alpaca keys → 0 git
+objects ever (they live only in gitignored `V2/.env`). Real FRED/FINNHUB keys →
+existed only as an **orphaned, uncommitted `git add` blob** (root `.env.example`
+staged with real keys at some point, never committed to any branch, never
+pushed). Purged it via `git reflog expire --expire-unreachable=now --all` +
+`git gc --prune=now` (verified 0 objects after). No `.env` ever tracked. Native
+GitHub secret-scanning is disabled on the repo, so the email was a
+partner/3rd-party scanner.
+
+**Fix (hygiene, since public repo):** removed the literal default password from
+both tracked compose files — now `${POSTGRES_PASSWORD:?…}` (required, no literal
+fallback) + `${POSTGRES_PASSWORD}` in the URI. Password sourced from
+`POSTGRES_PASSWORD` in gitignored `V2/.env` (value kept `postgres` to match the
+existing `cf_v2_pgdata` volume, fixed at init — changing it would break auth).
+Documented in `.env.example`. Both composes verified to still interpolate.
+
+**Still recommended (not done — needs David):** rotate FRED + Finnhub keys as
+cheap insurance (free; public repo). They were never pushed from this repo, but
+rotation is the only real remediation if they ever leaked another way.
+
+**Also this session — the git divergence:** `feature/V2` had been rewritten
+out-of-band (an external tool left a paused interactive rebase in
+`.git/rebase-merge`; all SHAs differed from origin with identical messages). My
+push rebased 2 real commits (deploy + a Settings.tsx percent-slider fix that was
+on master/UI-bugs but missing from feature/V2) onto origin tip; verified tree
+byte-identical to my work before pushing. No force-push, nothing lost.
+
 ### 2026-07-07 (b) — deployability: in-process scheduler + full-stack containers + DEPLOY.md
 
 **Context:** groundwork for deploying V2 to a Pi5, **replacing** V1 (which

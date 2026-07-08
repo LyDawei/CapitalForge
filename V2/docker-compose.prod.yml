@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in V2/.env}
       POSTGRES_DB: capitalforge_v2
     volumes:
       - cf_v2_pgdata:/var/lib/postgresql/data
@@ -37,7 +37,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/capitalforge_v2?schema=public"
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/capitalforge_v2?schema=public"
       PORT: "4000"
       ENABLE_SCHEDULER: "${ENABLE_SCHEDULER:-true}"
     ports:
