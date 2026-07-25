@@ -10,8 +10,10 @@ import {
 import { Badge } from '../components/Badges';
 import { WalletSection } from '../components/WalletSection';
 import { RiskConfigSection } from '../components/RiskConfigSection';
+import { useGuestMode } from '../lib/useGuestMode';
 
 export function Dashboard() {
+  const isGuest = useGuestMode();
   const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, refetchInterval: 30_000 });
   const portfolio = useQuery({ queryKey: ['portfolio-state'], queryFn: fetchPortfolioState });
@@ -68,20 +70,22 @@ export function Dashboard() {
       <section>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <h2 style={{ margin: 0 }}>Trade outcomes</h2>
-          <button
-            onClick={() => settleMut.mutate()}
-            disabled={settleMut.isPending}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 4,
-              border: '1px solid #d1d5db',
-              background: 'white',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
-            {settleMut.isPending ? 'Settling…' : 'Settle proposed plans'}
-          </button>
+          {!isGuest && (
+            <button
+              onClick={() => settleMut.mutate()}
+              disabled={settleMut.isPending}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 4,
+                border: '1px solid #d1d5db',
+                background: 'white',
+                cursor: 'pointer',
+                fontSize: 13,
+              }}
+            >
+              {settleMut.isPending ? 'Settling…' : 'Settle proposed plans'}
+            </button>
+          )}
         </div>
         {outcomes.data && (
           <div style={{ ...cardGrid, marginTop: 12 }}>

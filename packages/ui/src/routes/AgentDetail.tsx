@@ -14,8 +14,10 @@ import {
   type AgentNote,
 } from '../lib/api-client';
 import { Badge } from '../components/Badges';
+import { useGuestMode } from '../lib/useGuestMode';
 
 export function AgentDetail() {
+  const isGuest = useGuestMode();
   const { name } = useParams<{ name: string }>();
   const detail = useQuery({
     queryKey: ['agent', name],
@@ -49,14 +51,16 @@ export function AgentDetail() {
 
       <Section title="Performance">
         {perf.isLoading && <p>Loading…</p>}
-        {perf.data && <PerformancePanel perf={perf.data} />}
+        {perf.data && <PerformancePanel perf={perf.data} isGuest={isGuest} />}
       </Section>
 
-      <NotesSection
-        agentName={agent.name}
-        engineVersion={agent.engineVersion}
-        agentKey={fullAgentKey}
-      />
+      {!isGuest && (
+        <NotesSection
+          agentName={agent.name}
+          engineVersion={agent.engineVersion}
+          agentKey={fullAgentKey}
+        />
+      )}
 
       <Section title="Configuration">
         <p style={{ marginTop: 0 }}><strong>Role:</strong> {agent.role}</p>
@@ -111,7 +115,7 @@ export function AgentDetail() {
   );
 }
 
-function PerformancePanel({ perf }: { perf: AgentPerformance }) {
+function PerformancePanel({ perf, isGuest }: { perf: AgentPerformance; isGuest: boolean }) {
   const queryClient = useQueryClient();
   const settleMutation = useMutation({
     mutationFn: settlePlans,
@@ -172,7 +176,7 @@ function PerformancePanel({ perf }: { perf: AgentPerformance }) {
         />
       </div>
 
-      {!perf.hasOutcomes && (
+      {!perf.hasOutcomes && !isGuest && (
         <div
           style={{
             marginTop: 12,

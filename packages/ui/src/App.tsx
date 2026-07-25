@@ -6,11 +6,32 @@ import { CycleReplay } from './routes/CycleReplay';
 import { SymbolCycles } from './routes/SymbolCycles';
 import { Agents } from './routes/Agents';
 import { AgentDetail } from './routes/AgentDetail';
+import { useGuestMode } from './lib/useGuestMode';
 
 export function App() {
+  const isGuest = useGuestMode();
+
   return (
     <div className="app-shell">
-      <aside className="app-sidebar">
+      {isGuest && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            background: '#1e40af',
+            color: 'white',
+            padding: '8px 16px',
+            fontSize: 13,
+            zIndex: 1000,
+            textAlign: 'center',
+          }}
+        >
+          📊 <strong>Demo Mode</strong> — You are viewing with read-only access. This is simulated paper trading data.
+        </div>
+      )}
+      <aside className="app-sidebar" style={isGuest ? { marginTop: 36 } : {}}>
         <h1>
           CapitalForge <span className="badge">V2</span>
         </h1>
@@ -26,7 +47,7 @@ export function App() {
           </NavLink>
         </nav>
       </aside>
-      <main className="app-main">
+      <main className="app-main" style={isGuest ? { marginTop: 36 } : {}}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/cycles" element={<CyclesList />} />

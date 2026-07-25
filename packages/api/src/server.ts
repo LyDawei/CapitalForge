@@ -51,6 +51,20 @@ async function build() {
 
   app.decorate('prisma', getPrismaClient());
 
+  // Guest mode: extract ?guest=true from query string and enforce read-only on mutations
+  app.addHook('onRequest', async (req, reply) => {
+    const query = req.query as Record<string, unknown>;
+    const isGuest = query.guest === 'true';
+    (req as any).isGuest = isGuest;
+
+    if (isGuest && ['POST', 'PUT', 'DELETE'].includes(req.method)) {
+      // Skip guest check for health and read-only endpoints
+      if (req.url.startsWith('/api/admin') || req.url.includes('/notes')) {
+        reply.code(403).send({ error: { code: 'GUEST_FORBIDDEN', message: 'Guest users cannot modify data' } });
+      }
+    }
+  });
+
   await app.register(healthRoutes, { prefix: '/api' });
   await app.register(cycleRoutes, { prefix: '/api' });
   await app.register(portfolioRoutes, { prefix: '/api' });

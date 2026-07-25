@@ -51,6 +51,10 @@ export const notesRoutes: FastifyPluginAsync = async (fastify) => {
     '/notes',
     { schema: { body: NoteCreateSchema, tags: ['notes'], summary: 'Create a note for an agent' } },
     async (req, reply) => {
+      if ((req as any).isGuest) {
+        reply.code(403);
+        return { error: { code: 'GUEST_FORBIDDEN', message: 'Guest users cannot create notes' } };
+      }
       const note = await prisma.agentNote.create({ data: req.body });
       reply.code(201);
       return note;
@@ -61,6 +65,10 @@ export const notesRoutes: FastifyPluginAsync = async (fastify) => {
     '/notes/:id',
     { schema: { params: NoteParamsSchema, tags: ['notes'], summary: 'Delete a note' } },
     async (req, reply) => {
+      if ((req as any).isGuest) {
+        reply.code(403);
+        return { error: { code: 'GUEST_FORBIDDEN', message: 'Guest users cannot delete notes' } };
+      }
       try {
         await prisma.agentNote.delete({ where: { id: req.params.id } });
         reply.code(204);
@@ -81,7 +89,11 @@ export const notesRoutes: FastifyPluginAsync = async (fastify) => {
         summary: 'Run the counterfactual settlement simulator over proposed BUY plans',
       },
     },
-    async () => {
+    async (req, reply) => {
+      if ((req as any).isGuest) {
+        reply.code(403);
+        return { error: { code: 'GUEST_FORBIDDEN', message: 'Guest users cannot settle plans' } };
+      }
       const config = loadConfig();
       const alpaca = config.mode === 'mock' ? createMockAlpacaService() : createAlpacaService(config);
       return settleProposedPlans(prisma, alpaca, { minDaysOld: 0, maxToSettle: 200 });
