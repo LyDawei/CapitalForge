@@ -127,6 +127,12 @@ Open http://localhost:4001 — the dashboard lands first.
 daily scheduler): see **[DEPLOY.md](DEPLOY.md)**. TL;DR:
 `docker compose -f docker-compose.prod.yml up -d --build`.
 
+**Developing against real data:** `scripts/dev/sync-prod-data.sh user@pi-host`
+pulls a fresh copy of the production DB into your local Postgres (streams
+`pg_dump` over SSH straight into a local `pg_restore` — no dump file, no prod
+downtime). `--help` for details; overwrites local dev data, so it prompts for
+confirmation unless you pass `--yes`.
+
 ---
 
 ## Layout
