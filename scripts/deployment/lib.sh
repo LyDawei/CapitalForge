@@ -3,6 +3,14 @@
 # Sourced by deploy-v2.sh and initial-deploy/initial-deploy.sh — not meant to
 # be executed directly.
 
+# Pin the compose project name. The running prod stack's project is named
+# "v2" (inherited from when this app lived in a V2/ subdirectory — see
+# CLAUDE.md's 2026-07-28 entries). Compose otherwise infers the project name
+# from the current directory's basename, which is now the repo root's name —
+# NOT "v2" — so an unpinned `docker compose up` here would create a second,
+# empty-database stack alongside the real one instead of updating it.
+export COMPOSE_PROJECT_NAME=v2
+
 log() { printf '[capitalforge] %s\n' "$*"; }
 
 require_cmd() {
@@ -22,16 +30,15 @@ require_v2_env() {
   fi
 }
 
-# Idempotent — safe even if V1 was never started or is already stopped.
-# `docker compose down` on an already-down stack is a no-op, not an error.
+# V1 was fully retired 2026-07-28 (deleted from the repo entirely — see
+# CLAUDE.md) and confirmed to have zero footprint on this host (no
+# containers, processes, or listening ports). No-op kept only so callers
+# (deploy-v2.sh, initial-deploy.sh) don't need updating. Do NOT resurrect the
+# old file-existence check this used to have — after the V2/ -> repo-root
+# move, root docker-compose.yml is V2's own dev-only compose file, not a V1
+# signal, and running `down` against it would stop V2's dev Postgres.
 stop_v1() {
-  local repo_root="$1"
-  if [[ -f "$repo_root/docker-compose.yml" ]]; then
-    log "Stopping V1 (root packages/ monorepo stack)…"
-    ( cd "$repo_root" && docker compose -f docker-compose.yml down --remove-orphans )
-  else
-    log "No root docker-compose.yml found — nothing to stop."
-  fi
+  log "V1 was retired 2026-07-28 — nothing to stop."
 }
 
 # Idempotent — `compose up` only (re)creates services whose config/image changed.

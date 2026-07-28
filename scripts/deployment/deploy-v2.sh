@@ -7,11 +7,11 @@
 #
 # For the one-time V1 -> V2 cutover that also migrates existing V2 data from
 # another machine (pg_restore) and/or funds the wallet, use
-# V2/scripts/deployment/initial-deploy/initial-deploy.sh instead. That one is
+# scripts/deployment/initial-deploy/initial-deploy.sh instead. That one is
 # NOT safe to re-run; this one is.
 #
 # Usage:
-#   V2/scripts/deployment/deploy-v2.sh [--keep-v1] [--no-seed]
+#   scripts/deployment/deploy-v2.sh [--keep-v1] [--no-seed]
 #
 #   --keep-v1   don't stop the V1 stack (e.g. running both side by side)
 #   --no-seed   skip the agent-registry seed step
@@ -20,7 +20,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-V2_DIR="$REPO_ROOT/V2"
+V2_DIR="$REPO_ROOT"
 
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"

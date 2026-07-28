@@ -16,9 +16,9 @@
 #
 # Everything else this script does (stopping V1, building/starting the V2
 # stack, waiting for health) IS idempotent on its own — those steps are
-# delegated to V2/scripts/deployment/deploy-v2.sh, which is the script to use
+# delegated to scripts/deployment/deploy-v2.sh, which is the script to use
 # for every *subsequent* redeploy. This script exists only to bolt the two
-# genuinely one-time actions above onto that first run, per V2/DEPLOY.md
+# genuinely one-time actions above onto that first run, per DEPLOY.md
 # sections 2-3.
 #
 # Usage:
@@ -27,7 +27,7 @@
 #
 #   --fresh          start from an empty V2 database (runs prisma:seed)
 #   --dump <path>    restore an existing V2 dump (from `pg_dump -Fc`) before
-#                    the backend's first boot — see V2/DEPLOY.md section 3
+#                    the backend's first boot — see DEPLOY.md section 3
 #                    for how to produce that dump on the source machine
 #   --fund-wallet N  one-time deposit of $N into the sandbox wallet
 #                    (only meaningful with --fresh; a restored dump already
@@ -38,7 +38,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-V2_DIR="$REPO_ROOT/V2"
+V2_DIR="$REPO_ROOT"
 DEPLOY_DIR="$(dirname "$SCRIPT_DIR")"
 
 # shellcheck source=../lib.sh
@@ -85,7 +85,7 @@ echo " ONE-OFF: first V1 -> V2 cutover on this host."
 echo " Mode: $MODE${DUMP_PATH:+ ($DUMP_PATH)}"
 [[ -n "$FUND_AMOUNT" ]] && echo " Wallet funding: \$$FUND_AMOUNT (one-time deposit)"
 echo " This script is NOT idempotent — do not re-run it once it has succeeded."
-echo " Routine redeploys afterward: V2/scripts/deployment/deploy-v2.sh"
+echo " Routine redeploys afterward: scripts/deployment/deploy-v2.sh"
 echo "=================================================================="
 
 if [[ "$ASSUME_YES" == false ]]; then
@@ -143,4 +143,4 @@ if [[ -n "$FUND_AMOUNT" ]]; then
 fi
 
 print_status "$V2_DIR"
-log "Initial deploy complete. From now on, use V2/scripts/deployment/deploy-v2.sh for redeploys."
+log "Initial deploy complete. From now on, use scripts/deployment/deploy-v2.sh for redeploys."
