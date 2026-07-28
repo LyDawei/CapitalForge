@@ -7,20 +7,32 @@ import {
   useAnomalies,
   usePredictionScores,
   useAlpacaAccountSummary,
+  useWallet,
+  useWalletTransactions,
+  useAgreement,
   type AlpacaAccountSummary,
 } from '../api/hooks';
 import { api } from '../api/client';
 import MetricCard from '../components/MetricCard';
 import AgentBadge from '../components/AgentBadge';
 import { PredictionBadge } from '../components/PredictionBadge';
+import WalletBalanceChart from '../components/WalletBalanceChart';
+import CycleActivityChart from '../components/CycleActivityChart';
+import PredictionHitRateChart from '../components/PredictionHitRateChart';
+import AgreementMatrix from '../components/AgreementMatrix';
+import InfoTooltip from '../components/InfoTooltip';
 import { pct } from '../lib/format';
 
 export default function Dashboard() {
   const agents = useAgents();
   const cycles = useCycles(10);
+  const cycleActivity = useCycles(100);
   const anomalies = useAnomalies(true);
   const predictions = usePredictionScores();
   const needingReview = (predictions.data ?? []).filter((p) => p.needsReview);
+  const wallet = useWallet();
+  const walletTxs = useWalletTransactions(200, 0);
+  const agreement = useAgreement();
   const qc = useQueryClient();
 
   const [running, setRunning] = useState(false);
@@ -83,12 +95,58 @@ export default function Dashboard() {
       <div className="grid cols-4">
         <MetricCard label="Agents" value={`${activeAgents} / ${agentCount}`} sub="active / total" />
         <MetricCard label="Cycles run" value={`${cycleCount}`} />
-        <MetricCard label="Open anomalies" value={`${openAnomalies}`} sub={openAnomalies > 0 ? 'needs review' : 'clean'} />
+        <MetricCard
+          label={<>Open anomalies <InfoTooltip text="Automated flags for unusual agent behavior — e.g. a specialist's score wildly different from its own history, or a schema-invalid LLM response. Not trades, just things worth a human glance." /></>}
+          value={`${openAnomalies}`}
+          sub={openAnomalies > 0 ? 'needs review' : 'clean'}
+        />
         <MetricCard label="Status" value="ok" sub="api + db" />
       </div>
 
-      <LiveAccountCard />
+      <div className="card">
+        <h2>Wallet balance over time</h2>
+        {wallet.data && walletTxs.data ? (
+          <WalletBalanceChart balance={wallet.data.balance} transactions={walletTxs.data.transactions} />
+        ) : (
+          <div className="empty">Loading…</div>
+        )}
+      </div>
 
+      <div className="card">
+        <h2>Cycle activity</h2>
+        {cycleActivity.data ? (
+          <CycleActivityChart cycles={cycleActivity.data.cycles} />
+        ) : (
+          <div className="empty">Loading…</div>
+        )}
+      </div>
+
+      <div className="grid cols-2">
+        <div className="card">
+          <h2>
+            Agent hit rate
+            <InfoTooltip text="% of an agent's directional calls (bullish/bearish) that were later proven right once the trade settled. This is separate from whether the trade itself made money — it's about whether the agent's opinion matched what happened." />
+          </h2>
+          {predictions.data ? (
+            <PredictionHitRateChart scores={predictions.data} />
+          ) : (
+            <div className="empty">Loading…</div>
+          )}
+        </div>
+        <div className="card">
+          <h2>
+            Specialist agreement
+            <InfoTooltip text="% of cycles two specialists agreed on direction. ~50% = independent/no relationship (the actual baseline, not 0%). Near 100% = moving together (possibly redundant). Near 0% = systematically opposite, which is its own strong relationship, not healthy diversity. No target to hit — compare each pair to what you'd expect given what they measure." />
+          </h2>
+          {agreement.isLoading ? (
+            <div className="empty">Loading…</div>
+          ) : agreement.data ? (
+            <AgreementMatrix data={agreement.data} compact />
+          ) : null}
+        </div>
+      </div>
+
+      <LiveAccountCard />
 
       <div className="card">
         <h2>Run cycles</h2>

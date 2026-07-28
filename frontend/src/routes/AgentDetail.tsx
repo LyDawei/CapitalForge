@@ -13,6 +13,9 @@ import {
 import MetricCard from '../components/MetricCard';
 import AgentBadge from '../components/AgentBadge';
 import CalibrationChart from '../components/CalibrationChart';
+import DriftChart from '../components/DriftChart';
+import StabilityScatterChart from '../components/StabilityScatterChart';
+import InfoTooltip from '../components/InfoTooltip';
 import { PredictionInline } from '../components/PredictionBadge';
 import { pct, ms, usd, num, dateTime } from '../lib/format';
 
@@ -51,7 +54,10 @@ export default function AgentDetail() {
 
       <div className="grid cols-4">
         <MetricCard label="Runs (30d)" value={`${summary.data?.sampleSize ?? '—'}`} />
-        <MetricCard label="Schema fail rate" value={pct(summary.data?.schemaFailRate)} />
+        <MetricCard
+          label={<>Schema fail rate <InfoTooltip text="% of this agent's LLM responses that failed to parse into the expected JSON structure. This is a software reliability metric, not a trading one — high values mean the prompt/model is producing malformed output, unrelated to whether its trading calls are any good." /></>}
+          value={pct(summary.data?.schemaFailRate)}
+        />
         <MetricCard label="Avg latency" value={ms(summary.data?.avgLatencyMs)} />
         <MetricCard label="Total cost (30d)" value={usd(summary.data?.totalCostUsd, 4)} />
       </div>
@@ -155,32 +161,35 @@ function Performance({ name }: { name: string }) {
   return (
     <>
       <div className="card">
-        <h2>Calibration — confidence vs. observed win rate</h2>
+        <h2>
+          Calibration — confidence vs. observed win rate
+          <InfoTooltip text="Is this agent's stated confidence trustworthy? If it says 80% confident, does it actually win ~80% of the time? Points on the dashed diagonal line are well-calibrated; points below it mean the agent is overconfident." />
+        </h2>
         <p style={{ color: 'var(--text-dim)' }}>
-          Brier score: {num(cal.data?.brierScore, 3)} (lower = better, 0 is perfect).
-          Sample size: {cal.data?.sampleSize ?? 0}.
+          Brier score: {num(cal.data?.brierScore, 3)}{' '}
+          <InfoTooltip text="A standard score (0 to 1) for how well confidence matches outcomes, combining calibration and accuracy into one number. 0 = perfect, 1 = worst possible. Lower is better." />
+          . Sample size: {cal.data?.sampleSize ?? 0}.
         </p>
         {cal.data && <CalibrationChart data={cal.data} />}
       </div>
       <div className="card">
         <h2>Drift — rolling hit rate per prompt version</h2>
+        {drift.data && <DriftChart series={drift.data.series} />}
         {drift.data?.series?.length ? (
-          drift.data.series.map((s: any) => (
+          drift.data.series.map((s) => (
             <div key={s.promptVersionId} style={{ marginBottom: 16 }}>
               <h3 style={{ fontSize: 12, color: 'var(--text-dim)' }}>v{s.version} — {s.points.length} pts</h3>
               <table>
                 <thead><tr><th>Date</th><th>Rolling hit rate</th><th>Sample</th></tr></thead>
                 <tbody>
-                  {s.points.slice(-10).map((p: any, i: number) => (
+                  {s.points.slice(-10).map((p, i) => (
                     <tr key={i}><td>{p.date}</td><td>{pct(p.hitRate)}</td><td>{p.sampleSize}</td></tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ))
-        ) : (
-          <div className="empty">Not enough settled trades yet.</div>
-        )}
+        ) : null}
       </div>
     </>
   );
@@ -192,21 +201,49 @@ function Audit({ name }: { name: string }) {
   return (
     <>
       <div className="card">
-        <h2>Influence on the head trader</h2>
+        <h2>
+          Influence on the head trader
+          <InfoTooltip text="Did the final trading decision agree with this agent's own directional lean? This measures whether the head trader listens to this agent, not whether either of them was right." />
+        </h2>
         <div className="grid cols-4">
           <MetricCard label="Aligned" value={`${inf.data?.aligned ?? 0}`} sub="head trader sided with us" />
           <MetricCard label="Opposed" value={`${inf.data?.opposed ?? 0}`} sub="head trader overruled us" />
           <MetricCard label="Abstained" value={`${inf.data?.abstained ?? 0}`} sub="we offered no opinion" />
-          <MetricCard label="Alignment rate" value={pct(inf.data?.alignmentRate)} />
+          <MetricCard
+            label={<>Alignment rate <InfoTooltip text="aligned / (aligned + opposed) — how often the head trader's final call matched this agent's lean, when the agent had a lean at all." /></>}
+            value={pct(inf.data?.alignmentRate)}
+          />
         </div>
       </div>
       <div className="card">
-        <h2>Stability — output variance under replay</h2>
+        <h2>
+          Stability — output variance under replay
+          <InfoTooltip text="Given the exact same input twice, does this agent give the same answer? Low variance = consistent/reliable. High variance = the same input produces meaningfully different scores, which is a red flag for a model that should be deterministic-ish." />
+        </h2>
         <div className="grid cols-3">
-          <MetricCard label="Replay groups" value={`${stab.data?.sampleSize ?? 0}`} />
-          <MetricCard label="Avg score stdev" value={num(stab.data?.avgScoreStdev, 3)} sub="lower = more stable" />
-          <MetricCard label="Avg confidence stdev" value={num(stab.data?.avgConfidenceStdev, 3)} />
+          <MetricCard
+            label={<>Replay groups <InfoTooltip text="Sets of runs made on identical inputs, used to test consistency — each group is the same input run more than once." /></>}
+            value={`${stab.data?.sampleSize ?? 0}`}
+          />
+          <MetricCard
+            label={<>Avg score stdev <InfoTooltip text="Standard deviation of the bullish/bearish score across repeated runs on the same input. Lower = the agent gives a more consistent answer each time." /></>}
+            value={num(stab.data?.avgScoreStdev, 3)}
+            sub="lower = more stable"
+          />
+          <MetricCard
+            label={<>Avg confidence stdev <InfoTooltip text="Same idea as score stdev, but for the agent's stated confidence rather than its directional score." /></>}
+            value={num(stab.data?.avgConfidenceStdev, 3)}
+          />
         </div>
+        {stab.data && (
+          <div style={{ marginTop: 16 }}>
+            <StabilityScatterChart
+              points={stab.data.points}
+              avgScoreStdev={stab.data.avgScoreStdev}
+              avgConfidenceStdev={stab.data.avgConfidenceStdev}
+            />
+          </div>
+        )}
       </div>
     </>
   );

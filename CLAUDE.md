@@ -38,6 +38,76 @@ Append-only log of work sessions, **most recent first**. Each entry: what shippe
 > **Process rule (2026-07-07):** log this section **before every commit**, not just
 > at session end. No commit without a matching "Last Worked On" entry first.
 
+### 2026-07-28 (c) — dashboard/app-wide charts + plain-language tooltips
+
+**Ask:** the frontend (especially the Dashboard) showed a lot of raw numbers with
+no visual representation; separately, David (a software engineer, not a finance
+person) flagged that several metrics — the specialist agreement matrix
+specifically — weren't self-explanatory.
+
+**Shipped — charts** (Recharts `^2.13.0` was already a dependency, used
+previously in exactly one place, `CalibrationChart.tsx`; no backend changes
+needed anywhere):
+- **Dashboard**: wallet balance line chart (`WalletBalanceChart.tsx`, exact
+  running balance reconstructed backward from the wallet's authoritative
+  `SUM()` balance — no new endpoint), cycle activity diverging bar chart
+  (`CycleActivityChart.tsx`, BUY/SELL per day), per-agent hit-rate horizontal
+  bar chart (`PredictionHitRateChart.tsx`), and a compact specialist-agreement
+  heatmap reusing `AgreementMatrix.tsx`.
+- **Agent Detail**: drift multi-line chart (`DriftChart.tsx`, rolling hit-rate
+  per prompt version — data was already fetched, previously only shown as a
+  truncated table) and a stability scatter (`StabilityScatterChart.tsx`,
+  score/confidence variance under replay — same story, fetched but never
+  rendered).
+- **Trades**: win/loss/breakeven KPI tiles + cumulative P&L line chart
+  (`TradesPnlChart.tsx`).
+- **Bug fixed along the way**: `AgreementMatrix.tsx`'s color scale was a
+  red→green lerp implying good/bad polarity; agreement is actually a 0–100%
+  magnitude, so it's now a sequential blue ramp with a scale legend.
+- Chart colors were validated against the app's real dark panel surface
+  (`#131722`) using the `dataviz` skill's `validate_palette.js`, not eyeballed.
+
+**Shipped — plain-language explanations:** new `InfoTooltip.tsx` (hover `(i)`
+icon, dark-theme styled, `align` prop to avoid clipping near table edges —
+needed a fix for the Trades page's rightmost "R" column) added next to every
+non-obvious metric across Dashboard, Cycles, Cycle Detail, Trades, and Agent
+Detail (conviction, R-multiple, risk %, schema fail rate, Brier score,
+influence, stability stdev, specialist agreement).
+
+**Two real bugs caught during review, both fixed:**
+1. A pre-existing React key-prop warning in `AgreementMatrix.tsx` (unkeyed
+   `<>` fragment per matrix row).
+2. **Recharts' default tooltip *item* text renders black**, invisible on this
+   dark theme, unless `itemStyle`/`labelStyle` are set explicitly — surfaced
+   visibly only on the Agent Hit Rate chart (its `<Bar>` has no own `fill`,
+   colors come from per-`Cell` overrides, so Recharts had nothing to inherit
+   from and fell back to black) but was a latent bug in every chart's
+   copy-pasted `contentStyle`, including the pre-existing `CalibrationChart`.
+   Fixed in all 7 chart components.
+
+**Also corrected:** the agreement-matrix caption/tooltip copy was actively
+misleading — it read "high = redundant, low = orthogonal," implying 0% is the
+independence baseline. It isn't: **~50% is the "no relationship" point**
+(independent signals agree by chance about half the time); near 0% means
+*systematically opposite* calls, which is its own strong relationship, not
+healthy diversity. Copy fixed in both `Audit.tsx` and the Dashboard's compact
+card tooltip to explain this correctly, plus that there's no universal target
+— expected agreement is pair-specific (e.g. momentum↔trendRegime running high
+is two trend-following lenses correctly agreeing, not redundancy to fix).
+
+**Verified:** `tsc --noEmit` clean, `npm test` 115/115 passing (no backend
+touched), frontend production build succeeds. Visually verified every chart
+and tooltip via a temporary headless-Chromium/Playwright install (browser
+tools weren't enabled this session) against real dev data — installed and
+fully removed afterward, not a new project dependency.
+
+**Not done:** no backend changes were needed or made. Wallet balance chart's
+x-axis currently shows repeated dates because all 112 existing wallet
+transactions share one real-world timestamp (from when a backfill script ran)
+despite representing trades across different simulated dates — a data
+characteristic that will resolve naturally as the scheduler accrues real
+day-by-day activity, not a chart bug.
+
 ### 2026-07-28 (b) — confirmed V1 already off in prod; removed leftover image
 
 **Ask:** shut down V1 since only V2 is wanted now. Investigated this host
