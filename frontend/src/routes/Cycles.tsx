@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useCycles } from '../api/hooks';
+import InfoTooltip from '../components/InfoTooltip';
 import { dateTime, ms, usd } from '../lib/format';
 
 export default function Cycles() {
@@ -14,7 +15,9 @@ export default function Cycles() {
             <thead>
               <tr>
                 <th>Date</th><th>Symbol</th><th>Status</th><th>Specialists</th>
-                <th>Action</th><th>Conviction</th><th>Latency</th><th>Cost</th>
+                <th>Action</th>
+                <th>Conviction <InfoTooltip text="0-1 score for how confident the head trader is in this decision. Higher conviction means a larger position size; below a threshold, the decision is HOLD regardless of direction." /></th>
+                <th>Latency</th><th>Cost</th>
               </tr>
             </thead>
             <tbody>

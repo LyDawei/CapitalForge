@@ -90,24 +90,61 @@ export const useCalibration = (name: string | undefined) =>
     enabled: !!name,
   });
 
+export interface DriftPoint {
+  date: string;
+  hitRate: number;
+  sampleSize: number;
+}
+export interface DriftSeries {
+  promptVersionId: string;
+  version: string;
+  points: DriftPoint[];
+}
+export interface Drift {
+  rollingDays: number;
+  series: DriftSeries[];
+}
+
 export const useDrift = (name: string | undefined) =>
   useQuery({
     queryKey: ['drift', name],
-    queryFn: () => api<any>(`/api/audit/drift/${name}`),
+    queryFn: () => api<Drift>(`/api/audit/drift/${name}`),
     enabled: !!name,
   });
+
+export interface Influence {
+  sampleSize: number;
+  aligned: number;
+  opposed: number;
+  neutral: number;
+  abstained: number;
+  alignmentRate: number;
+}
 
 export const useInfluence = (name: string | undefined) =>
   useQuery({
     queryKey: ['influence', name],
-    queryFn: () => api<any>(`/api/audit/influence/${name}`),
+    queryFn: () => api<Influence>(`/api/audit/influence/${name}`),
     enabled: !!name,
   });
+
+export interface StabilityPoint {
+  inputHash: string;
+  replays: number;
+  scoreStdev: number;
+  confidenceStdev: number;
+}
+export interface Stability {
+  sampleSize: number;
+  avgScoreStdev: number;
+  avgConfidenceStdev: number;
+  points: StabilityPoint[];
+}
 
 export const useStability = (name: string | undefined) =>
   useQuery({
     queryKey: ['stability', name],
-    queryFn: () => api<any>(`/api/audit/stability/${name}`),
+    queryFn: () => api<Stability>(`/api/audit/stability/${name}`),
     enabled: !!name,
   });
 

@@ -23,6 +23,8 @@ export default function CalibrationChart({ data }: Props) {
         <ReferenceLine segment={[{ x: 0, y: 0 }, { x: 1, y: 1 }]} stroke="#7fc8a9" strokeDasharray="4 4" />
         <Tooltip
           contentStyle={{ background: '#131722', border: '1px solid #2a2f42' }}
+          labelStyle={{ color: '#d6deeb' }}
+          itemStyle={{ color: '#d6deeb' }}
           formatter={(v: number, name: string) => [v.toFixed(2), name === 'observed' ? 'Observed' : 'Stated']}
         />
         <Scatter data={points} fill="#6dbbe7" />
