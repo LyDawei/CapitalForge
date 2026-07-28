@@ -4,7 +4,7 @@
 #
 #   docker compose -f docker-compose.prod.yml up -d --build
 #
-# Reads V2/.env for API keys + LLM/Alpaca config. Two values are overridden
+# Reads .env for API keys + LLM/Alpaca config. Two values are overridden
 # below because the .env defaults are host-oriented:
 #   - DATABASE_URL points at localhost in .env, which is wrong inside a
 #     container; here it targets the in-network `postgres` service.
@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in V2/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: capitalforge_v2
     ports:
       - "5432:5432"   # host access for remote DB tools (DBeaver/TablePlus/psql); exposed on all interfaces

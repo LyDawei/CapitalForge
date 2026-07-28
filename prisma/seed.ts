@@ -16,7 +16,7 @@ import { GROWTH_SCOUT_PROMPT_V_0_1_0 } from '../backend/src/prompts/growthScout.
 
 if (!process.env.DATABASE_URL) {
   // eslint-disable-next-line no-console
-  console.error('DATABASE_URL is not set — see V2/.env.example');
+  console.error('DATABASE_URL is not set — see .env.example');
   process.exit(1);
 }
 

@@ -69,7 +69,7 @@ wait_for_backend_health() {
 # Safe to call on every deploy, not just the first one.
 seed_agent_registry() {
   local v2_dir="$1"
-  log "Seeding agent registry + prompts (safe to re-run — upserts, see V2/prisma/seed.ts)…"
+  log "Seeding agent registry + prompts (safe to re-run — upserts, see prisma/seed.ts)…"
   ( cd "$v2_dir" && docker compose -f docker-compose.prod.yml exec -T backend npm run prisma:seed )
 }
 

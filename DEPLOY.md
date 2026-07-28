@@ -136,7 +136,7 @@ it lives inside the backend process (like V1's).
 - **When:** `SCHEDULE_CRON`, default `30 16 * * 1-5` (4:30pm, Mon–Fri),
   interpreted in `SCHEDULE_TZ` (default `America/New_York`) — so the Pi's own
   clock/timezone is irrelevant.
-- **Override** either in `V2/.env`.
+- **Override** either in `.env`.
 - **Turn off:** `ENABLE_SCHEDULER=false` in `.env`.
 - **Single instance only:** run exactly one backend with the scheduler armed. It
   overlap-guards itself (a slow run won't stack on the next tick) but two
