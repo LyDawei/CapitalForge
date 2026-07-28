@@ -4,28 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-> **⚠️ Active surface (May 2026): `V2/` at repo root, not `packages/`.** The
-> sections below describe the original `packages/` monorepo (V1 + an earlier
-> in-monorepo "V2 engine"). Current work has moved to a separate **Agent Audit
-> Console** under `V2/` — its own Prisma project, Fastify backend on :4000, Vite
-> UI on :4001, no Docker/Turborepo. See `V2/README.md` + `V2/TODO.md` for the
-> live picture and the dated "Last Worked On" entry below for where it stands.
-> The `packages/` tree still builds but is no longer the focus.
+CapitalForge is an AI-powered trading **audit console** — a system for
+observing, auditing, and improving the AI agents that make trading decisions,
+not just running them blind. Eight specialists (`trendRegime`, `setupPattern`,
+`momentum`, `meanReversion`, `volumeFlow`, `newsEvents`, `macroContext`,
+`liquiditySlippage`) run in parallel per cycle; a `headTrader` agent reads all
+eight and emits a `TradePlan`; two adversarial reviewers (`riskAuditor`,
+`devilsAdvocate`) and a post-cycle `critic` check its work; a `growthScout`
+pipeline proposes watchlist additions. Every LLM call is recorded as an
+`AgentRun` (inputHash, promptVersion, model, latency, tokens, cost,
+rawResponse, parsedOutput, schemaValid) so drift, calibration, and hit-rate are
+queryable rather than anecdotal.
 
-CapitalForge is an AI-powered swing trading system. Two engine versions live side-by-side:
+> **2026-07-28: this *is* the whole project now.** What used to be a separate
+> `V2/` console living alongside a legacy `packages/` npm-workspaces monorepo
+> (V1's four-agent system, plus an earlier abandoned mid-2026 rewrite) has been
+> promoted — lifted out of `V2/` to become the repo root, with `packages/` and
+> all V1 code deleted outright. Older "Last Worked On" entries below that
+> reference `V2/`-prefixed paths predate this move; the content is unchanged,
+> just living at repo root now instead of nested under `V2/`.
 
-- **V1 (legacy, scheduled for removal once V2 is validated)** — four LLM agents (momentum, mean reversion, confirmation, news/events) running in parallel; confidence-weighted aggregation with ±0.4 thresholds; fixed 20% position sizing.
-- **V2 (current target)** — six specialists (`trendRegime`, `setupPattern`, `momentum`, `meanReversion`, `volumeFlow`, `newsEvents`) running in parallel, plus a `headTrader` agent that reads all six and emits a complete `TradePlan` (action, conviction, entry, stop, target1/2, riskPctOfEquity, invalidationCriteria, reasoningTrace). Risk manager V2 enforces conviction-weighted sizing + drawdown ladder.
-
-Switch between them with `ENGINE_VERSION=v1` (default) or `ENGINE_VERSION=v2`.
-
-The repo is a **monorepo** under `packages/`:
-- `@capitalforge/shared` — Zod schemas + `AGENT_REGISTRY` (single source of truth for agent metadata)
-- `@capitalforge/engine` — cron + V1/V2 orchestrators, services, Prisma schema/migrations, settler
-- `@capitalforge/api` — Fastify + Zod HTTP API on :3001
-- `@capitalforge/ui` — Vite + React SPA on :3000
-
-Trades execute via Alpaca paper trading; the simulated wallet (`SandboxState`) is shared across symbols.
+Not a Docker-first project for day-to-day dev — Postgres runs in Docker
+(`docker compose up -d postgres`), backend (Fastify, :4000) and frontend
+(Vite, :4001) run locally via `npm run dev`. See **README.md** for the
+stack/audit-dimensions overview, **TODO.md** for the live roadmap and
+promotion-readiness bar, **DEPLOY.md** for the Pi5/production cutover runbook,
+and **DOCKER.md** for the Postgres-in-Docker operational runbook.
 
 ## Last Worked On
 
@@ -33,6 +37,68 @@ Append-only log of work sessions, **most recent first**. Each entry: what shippe
 
 > **Process rule (2026-07-07):** log this section **before every commit**, not just
 > at session end. No commit without a matching "Last Worked On" entry first.
+
+### 2026-07-28 (b) — confirmed V1 already off in prod; removed leftover image
+
+**Ask:** shut down V1 since only V2 is wanted now. Investigated this host
+(`baymax`, the Pi5 — confirmed via `uname`/hostname, not a separate deploy
+target) before touching anything: `docker ps -a`, `docker compose ls`,
+`crontab -l`, `systemctl list-units`, `ps aux`, and `ss -tlnp` all agree —
+**V1 has no footprint here.** No `capitalforge-engine`/`-api`/`-ui` containers
+(running or exited), no V1 node process, no crontab/systemd timer, nothing
+listening on :3000/:3001 (V1's ports).
+
+**Bigger finding: V2's prod stack was already live.** `docker compose ls`
+shows project `v2` running 3 containers (`capitalforge-v2-db`,
+`-backend`, `-frontend`) via `docker-compose.prod.yml`, up for **3 days** on
+:4000/:4001/:5432 — i.e. the Pi5 cutover that the 2026-07-07(b) entry listed as
+a **Next** item, and that this session's earlier "Known follow-up" note
+assumed was still pending, had in fact *already happened* before today,
+untracked in this log. (Compose still remembers the file at its pre-move path,
+`/home/lydawei/CapitalForge/V2/docker-compose.prod.yml` — cosmetic only, the
+running containers are unaffected; a future redeploy from this repo will
+naturally pick up the new root path.)
+
+**Action taken:** removed the one real V1 leftover found — a dangling, 4-month-old,
+zero-containers-attached `capitalforge-app:latest` image (`docker rmi`). Nothing
+else to shut down; V1 was already fully off.
+
+**Correction to this session's earlier note:** the "Known follow-up (not part
+of this file-restructuring pass)" paragraph below (in the entry directly under
+this one) says the Pi5 cutover was "not yet executed" — that was true when
+written, based on the doc trail, but turned out to be stale by the time this
+host was actually checked. V1 retirement in production is done.
+
+### 2026-07-28 — V2 promoted to repo root; `packages/` (V1) deleted
+
+**What happened:** per David's decision, `V2/`'s Agent Audit Console is now
+*the* product. Lifted every file out of `V2/` to the repo root via `git mv`
+(history preserved — `git log --follow` still works on moved files), including
+in-flight uncommitted work (`prisma/migrations/20260724000001_broker_order_tracking/`,
+`scripts/deployment/`, modified `cycleRunner.ts`/`alpaca.*.ts`). Deleted
+outright: the entire `packages/` npm-workspaces tree (V1's four-agent system
+plus the earlier, already-abandoned `packages/engine` V2 rewrite), root
+Turborepo/Docker/Prisma scaffolding that only existed to support it
+(`turbo.json`, `Dockerfile.{engine,api,ui}`, root `docker-compose.yml`, root
+`prisma/` — a third, orphaned pre-monorepo migration history), and stale docs
+(`AGENTS.md`, `ARCHITECTURE.md` — both described the long-gone flat
+pre-monorepo `src/` layout). CLAUDE.md's Project Overview / Build Commands /
+Architecture / Tech Stack sections were rewritten to describe the now-flat
+repo; this "Last Worked On" log and the Self-Correction Rules below were left
+untouched.
+
+**Not done here — separate concern:** the Pi5 production host still runs V1
+today via its own checked-out Docker Compose stack. This session only removed
+V1 from the *git repo*; the actual production cutover is still `DEPLOY.md`'s
+Pi5 runbook (`scripts/deployment/`), not yet executed. Don't read this entry
+as "V1 is off in prod" — it isn't, yet.
+
+**Also worth flagging:** V2's own validation bar (per `TODO.md`, ~60
+directional samples before trusting any edge) has not been cleared — current
+data is a single 42-cycle backfill window with 4 BUY trades (4/4 winners, but
+n=4, explicitly noted elsewhere as "profitability completely unproven").
+Promoting V2 to be *the* codebase is a separate decision from V2 being
+*validated*; this session did the former only.
 
 ### 2026-07-07 (c) — secret-scan follow-up: default Postgres password (false positive)
 
@@ -314,97 +380,74 @@ AAPL/NVDA/SPY × 21 trading days (2026-04-22 → 2026-05-20), gpt-4o, $4.24 spen
 
 ## Build & Development Commands
 
-All commands run from the repo root unless noted.
+All commands run from the repo root.
 
 ```bash
-# Root (turbo-driven across all workspaces)
-npm install                         # install all workspaces
-npm run build                       # turbo run build --filter=@capitalforge/*
-npm test                            # turbo run test --filter=@capitalforge/*
-npm run dev                         # turbo run dev --parallel (engine cron + api + ui)
-npm run prisma:generate             # delegates to engine package
-npm run prisma:migrate              # delegates to engine package
-npm run prisma:studio               # delegates to engine package
-npm run run-cycle -- --date YYYY-MM-DD       # manual cycle trigger (engine)
-npm run docker:up                   # docker compose up -d (postgres + engine + api + ui)
-npm run docker:down
+npm install                    # install both workspaces (backend, frontend)
+npm run dev                    # backend (tsx watch, :4000) + frontend (Vite, :4001) in parallel
+npm run dev:backend            # backend only
+npm run dev:frontend           # frontend only
+npm run build                  # backend tsc + frontend vite build
+npm test                       # backend Jest suite
+npm run prisma:generate        # generate Prisma client (backend)
+npm run prisma:migrate         # apply local DB migrations (backend)
+npm run prisma:studio          # Prisma Studio
+npm run prisma:seed            # seed script
+npm run run-cycle              # manual single-cycle trigger
+npm run seed-cycles            # seed backfilled cycles
 
-# Engine-only
-npm run dev -w @capitalforge/engine                # cron loop + ts-node
-npm run run-cycle -w @capitalforge/engine -- --date 2026-04-26
-npm run settle-plans -w @capitalforge/engine       # counterfactual outcome settler
-
-# API-only
-npm run dev -w @capitalforge/api                   # Fastify on :3001 (Swagger UI at /api/docs)
-
-# UI-only
-npm run dev -w @capitalforge/ui                    # Vite on :3000
+docker compose up -d postgres  # Postgres only — backend/frontend still run locally
 ```
 
-Run a single test file: `npx jest packages/engine/src/config.test.ts` (from root).
+Run a single backend test file: `npx jest backend/src/runner/technicals.test.ts` (from root).
 
-Switch engines: `ENGINE_VERSION=v2` in `.env` or shell. `MODE=mock` keeps everything deterministic without API keys.
+Switch LLM provider/model via `.env` (`LLM_PROVIDER`, `LLM_MODEL`,
+`LLM_MODEL_SPECIALIST`). `MODE=mock` keeps everything deterministic without
+real API keys.
 
 ## Architecture
 
-### V2 Daily Cycle (per symbol)
+Source of truth is **README.md** (stack, audit dimensions, schema) and
+**TODO.md** (roadmap, promotion-readiness criteria). Key source directories:
 
-1. Fetch ≥65 daily bars → compute RSI(14), SMA(20/50), MACD(12,26,9), volume vs 30-day avg.
-2. Persist `DailyCycle` (engineVersion=v2).
-3. Mark sandbox to market.
-4. Run **six specialists in parallel** — each emits `{bullishScore, confidence, rationale, flags, keyLevels?, extras?}` validated against `SpecialistOutputSchema`. Persist to `SpecialistAnalysis`.
-5. **Head trader** receives all 6 specialist outputs + market context + sandbox state. Single LLM call (M3) → emits a complete `TradePlan` validated against `TradePlanSchema`. Persist `Deliberation` + `TradePlan` (status=`proposed`). M4 adds tool-calling rounds.
-6. **Risk manager V2** clamps the plan: caps `riskPctOfEquity` at 2%, halves at 10% drawdown, forces HOLD at 15%+, hard-halts at 20%. Computes `shares = floor((equity × riskPct) / (entry − stop))`.
-7. Persist with sandbox snapshot. Trade execution lands in M5/M6.
-
-### Key V2 Modules
-
-- `packages/engine/src/v2/engine/orchestratorV2.ts` — V2 cycle driver, implements `OrchestratorAPI` (also implemented by V1's `Orchestrator`).
-- `packages/engine/src/v2/engine/headTrader.ts` — single-shot deliberation + `parseTradePlan()`. M4 will replace with tool-using loop.
-- `packages/engine/src/v2/engine/riskManagerV2.ts` — `applySizing()` pure function with drawdown ladder + cash-floor + cap.
-- `packages/engine/src/v2/engine/settlePlans.ts` — counterfactual settler. Walks proposed BUY plans forward via `AlpacaService.getBarsAfter()`. Stop-hit / target-hit / time-stop detection.
-- `packages/engine/src/v2/specialists/{base,trendRegime,setupPattern,momentum,meanReversion,volumeFlow,newsEvents}.ts` — `Specialist` interface + 6 implementations + `SPECIALIST_ROSTER`.
-- `packages/engine/src/v2/prompts/headTrader.ts` — head-trader prompt builder + `computeMeta()` block (machine-readable summary that mock LLM parses; real LLM can ignore it).
-- `packages/engine/src/services/llm.ts` — `LLMService` interface adds `completeRaw(prompt)` for V2; V1 still uses `complete()`.
-- `packages/engine/src/services/llm.mock.ts` — extended with `[SPECIALIST=name]` and `[HEAD_TRADER]` markers for deterministic mock outputs.
-- `packages/engine/src/admin.ts` — public library surface (settler + service factories) consumed by `@capitalforge/api`. Engine's `package.json` `main` points here, NOT the cron entry.
-- `packages/shared/src/registry.ts` — `AGENT_REGISTRY` is the single source of truth for agent metadata. Both engine (uses prompt versions) and api/ui (display config) read from here.
-- `packages/shared/src/schemas/v2/{specialist,deliberation,toolCall,tradePlan}.ts` — V2 Zod schemas.
-
-### V1 (legacy)
-
-V1 lives at `packages/engine/src/{agents,core,prompts.ts,types.ts}`. All V1 entries in `AGENT_REGISTRY` are tagged `engineVersion: 'v1'`. Don't add features to V1; bug-fix only if a V2 comparison depends on it.
-
-### Database (Prisma 7 + PostgreSQL 16)
-
-Schema at `packages/engine/prisma/schema.prisma`. Generator output is configured to root `node_modules/.prisma/client` so engine + api both consume the same client.
-
-V1 tables: `DailyCycle`, `AgentEvaluation`, `AggregatedDecision`, `Trade`, `SandboxState`, `PromptVersion`.
-V2 tables (additive): `SpecialistAnalysis`, `Deliberation`, `ToolCall`, `TradePlan`, `SectorMap`, `AgentNote`.
-`DailyCycle.engineVersion` distinguishes which children to expect.
-
-### Service Abstraction
-
-`AlpacaService`, `LLMService`, `NewsService` — interfaces with real + mock implementations. `MODE=mock|paper` selects which. Mock implementations are deterministic for reproducible tests.
-
-### Shared Wallet / Sandbox
-
-A single `$2000` (default) wallet is shared across all symbols. The sandbox is loaded once per cycle batch and threaded through each symbol sequentially. V1 enforces 1-position-max in `riskManager.ts`. V2 will enforce 3-positions-max + concentration limits in M6.
+- `backend/src/runner/` — `cycleRunner.ts` (per-symbol daily cycle driver),
+  `agentRunner.ts` + `agentFeeds.ts` (LLM invocation + audit-trail recording),
+  `scheduler.ts` (in-process daily cron, gated by `ENABLE_SCHEDULER`),
+  `settler.ts` (counterfactual TradePlan outcome settlement), `growthScout.ts`
+  (watchlist-proposal pipeline).
+- `backend/src/prompts/` — versioned prompt templates per agent
+  (`<agent>.v<major>.<minor>.<patch>.ts`); registered/activated via
+  `scripts/upgrade-prompt.ts`.
+- `backend/src/audit/` — drift, calibration, agreement, influence, stability,
+  anomaly detection over `AgentRun` history.
+- `backend/src/routes/` — Fastify route handlers, one file per resource.
+- `backend/src/services/` — external integrations: `alpaca.real.ts`/`alpaca.ts`
+  (market data + orders), `finnhub.ts` (news/fundamentals), `fred.ts` (macro),
+  `llm.openai.ts`/`llm.ts` (provider-agnostic LLM adapter), `wallet.ts`
+  (persistent sandbox wallet ledger).
+- `prisma/schema.prisma` — DB schema (Prisma 7 + `@prisma/adapter-pg`).
+- `frontend/src/routes/` — one file per UI page (Dashboard, Cycles, CycleDetail,
+  Agents, AgentDetail, Prompts, Audit, Trades, Wallet, Watchlist, Feeds,
+  Settings).
 
 ## Environment Setup
 
-Copy `.env.example` to `.env`. For mock mode the API keys can be placeholders. Postgres connects via `localhost:5432` from host; `docker-compose.yml` overrides to the internal hostname for in-container services.
+Copy `.env.example` to `.env`. For mock mode (`MODE=mock`), API keys can be
+placeholders. Postgres runs in Docker (`docker compose up -d postgres`) and
+owns host port 5432 — see **DOCKER.md** for the full runbook and
+troubleshooting if Docker Desktop won't boot.
 
 ## Tech Stack
 
-- Node.js ≥18, TypeScript 5.7 (strict, ES2022, CommonJS for engine/api; ESNext bundler for UI)
-- npm workspaces + Turborepo
+- Node.js ≥18, TypeScript 5.7 (strict)
+- npm workspaces (`backend`, `frontend`) — no Turborepo, no `packages/`
 - Prisma 7.x + `@prisma/adapter-pg` + `pg`, PostgreSQL 16
-- OpenAI SDK (GPT-4o today; Anthropic adapter on the side-quest list), Zod everywhere
-- Fastify 5 + `@fastify/swagger` + `fastify-type-provider-zod`
-- Vite 6 + React 18 + React Router 6 + TanStack Query 5 + Recharts (planned)
+- LLM: OpenAI (gpt-4o head trader / gpt-4o-mini specialists) and Anthropic,
+  provider-agnostic via `LLM_PROVIDER`. Zod everywhere.
+- Fastify 5 + `@fastify/swagger` (Swagger UI at `/docs`) + `fastify-type-provider-zod`
+- Vite 6 + React 18 + React Router 6 + TanStack Query 5 + Recharts
 - Jest + ts-jest
-- Docker + Docker Compose
+- Docker Compose for Postgres (dev) and full-stack (prod, `docker-compose.prod.yml`)
 
 ## Self-Correction Rules
 
