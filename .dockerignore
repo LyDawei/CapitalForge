@@ -1,5 +1,15 @@
+# Keep the build context small and platform-clean. Host node_modules contains
+# native binaries built for the host arch (e.g. win32/amd64) that must never
+# leak into the container image — each image runs its own `npm ci`.
 node_modules
-dist
+**/node_modules
+**/dist
+**/coverage
+
+# Secrets + local noise. Runtime env is injected by compose (env_file), not
+# baked into the image.
 .env
-logs
+*.dump
+*.log
 .git
+.DS_Store

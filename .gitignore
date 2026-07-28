@@ -1,40 +1,17 @@
-# Dependencies
 node_modules/
-
-# Build output
 dist/
-
-# Environment files
+build/
 .env
 .env.local
-.env.*.local
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Prisma
-packages/engine/prisma/migrations/
-
-# Build output
-.next/
 .turbo/
-.vite/
-
-# Test coverage
+.DS_Store
+*.log
 coverage/
+.vite/
+*.tsbuildinfo
+prisma/migrations/dev.db*
+.prisma/
 
-# Temporary files
-*.tmp
-*.temp
+# Postgres dumps (DB migration / backups — data, not source)
+*.dump
+*.sql.gz

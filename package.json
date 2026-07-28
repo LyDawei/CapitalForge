@@ -1,32 +1,29 @@
 {
   "name": "capitalforge",
-  "version": "2.0.0",
-  "description": "AI-powered swing trading system (monorepo: engine, api, ui, shared)",
+  "version": "0.1.0",
+  "description": "CapitalForge — Agent Audit Console",
   "private": true,
-  "packageManager": "npm@10.9.2",
   "workspaces": [
-    "packages/shared",
-    "packages/engine",
-    "packages/api",
-    "packages/ui"
+    "backend",
+    "frontend"
   ],
   "scripts": {
-    "build": "turbo run build --filter=@capitalforge/*",
-    "test": "turbo run test --filter=@capitalforge/*",
-    "dev": "turbo run dev --parallel --filter=@capitalforge/*",
-    "lint": "turbo run lint --filter=@capitalforge/*",
-    "prisma:generate": "npm run prisma:generate -w @capitalforge/engine",
-    "prisma:migrate": "npm run prisma:migrate -w @capitalforge/engine",
-    "prisma:studio": "npm run prisma:studio -w @capitalforge/engine",
-    "run-cycle": "npm run run-cycle -w @capitalforge/engine",
-    "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down",
-    "docker:build": "docker compose build --no-cache"
-  },
-  "devDependencies": {
-    "turbo": "^2.3.0"
+    "dev": "npm-run-all --parallel dev:backend dev:frontend",
+    "dev:backend": "npm run dev -w @cf2/backend",
+    "dev:frontend": "npm run dev -w @cf2/frontend",
+    "build": "npm run build -w @cf2/backend && npm run build -w @cf2/frontend",
+    "test": "npm test -w @cf2/backend",
+    "prisma:migrate": "npm run prisma:migrate -w @cf2/backend",
+    "prisma:generate": "npm run prisma:generate -w @cf2/backend",
+    "prisma:studio": "npm run prisma:studio -w @cf2/backend",
+    "prisma:seed": "npm run prisma:seed -w @cf2/backend",
+    "run-cycle": "npm run run-cycle -w @cf2/backend",
+    "seed-cycles": "npm run seed-cycles -w @cf2/backend"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
   }
 }

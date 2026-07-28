@@ -1,73 +1,37 @@
+# V2 Agent Audit Console — database only.
+#
+# Deliberately NOT a full-stack compose. The backend (:4000) and frontend
+# (:4001) still run locally via `npm run dev`; only Postgres is containerized
+# so the data lives in a managed volume instead of a local Postgres install.
+#
+#   docker compose up -d        # start the DB
+#   docker compose down         # stop it (data persists in the named volume)
+#   docker compose down -v      # stop AND wipe the volume (destroys all cycles)
+#
+# Credentials + db name match V2/.env's DATABASE_URL:
+#   postgresql://postgres:<POSTGRES_PASSWORD>@localhost:5432/capitalforge_v2
+#
+# NOTE: host port 5432 must be free. If a local Postgres service is bound to
+# it, stop that service first (see README/handoff), or change the host side of
+# the port mapping below to e.g. "5434:5432" and update DATABASE_URL to match.
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: capitalforge-db
+    container_name: capitalforge-v2-db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: capitalforge
-      POSTGRES_PASSWORD: capitalforge
-      POSTGRES_DB: capitalforge
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in V2/.env}
+      POSTGRES_DB: capitalforge_v2
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - cf_v2_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U capitalforge"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d capitalforge_v2"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  engine:
-    build:
-      context: .
-      dockerfile: Dockerfile.engine
-    container_name: capitalforge-engine
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://capitalforge:capitalforge@postgres:5432/capitalforge?schema=public
-      ALPACA_API_KEY: ${ALPACA_API_KEY}
-      ALPACA_API_SECRET: ${ALPACA_API_SECRET}
-      ALPACA_BASE_URL: ${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      TRADING_SYMBOLS: ${TRADING_SYMBOLS:-SPY}
-      ALLOCATED_CAPITAL: ${ALLOCATED_CAPITAL:-2000}
-      POSITION_SIZE_PCT: ${POSITION_SIZE_PCT:-0.2}
-      MAX_DRAWDOWN_PCT: ${MAX_DRAWDOWN_PCT:-0.2}
-      LLM_MODEL: ${LLM_MODEL:-gpt-4o}
-      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.2}
-      CRON_SCHEDULE: ${CRON_SCHEDULE:-35 9 * * 1-5}
-      MODE: ${MODE:-mock}
-      ENGINE_VERSION: ${ENGINE_VERSION:-v1}
-    volumes:
-      - ./logs:/app/logs
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
-    container_name: capitalforge-api
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://capitalforge:capitalforge@postgres:5432/capitalforge?schema=public
-      API_PORT: 3001
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-    ports:
-      - "3001:3001"
-
-  ui:
-    build:
-      context: .
-      dockerfile: Dockerfile.ui
-    container_name: capitalforge-ui
-    depends_on:
-      - api
-    environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3001}
-    ports:
-      - "3000:3000"
-
 volumes:
-  postgres_data:
+  cf_v2_pgdata:

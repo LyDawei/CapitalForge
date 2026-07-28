@@ -1,0 +1,689 @@
+// CapitalForge V2 — Agent Audit Console
+//
+// Audit-first schema: every LLM invocation is recorded as an `AgentRun` with
+// inputs, outputs, prompt version, model, latency, tokens, cost, and
+// schema-validity. Domain tables (SpecialistAnalysis, TradePlan, etc.) reference
+// an AgentRun so you can always trace a decision back to the exact LLM call that
+// produced it.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// Agent registry — one row per logical agent in the system.
+// ============================================================================
+
+enum AgentKind {
+  specialist
+  head_trader
+  risk_auditor
+  devils_advocate
+  critic
+  /// Universe-wide stock-discovery agent. Runs weekly (manual trigger today;
+  /// cron pluggable). Outputs WatchlistProposal rows for operator approval
+  /// — does NOT modify the live watchlist directly.
+  scout
+}
+
+model Agent {
+  id            String    @id @default(uuid())
+  /// Stable machine name (e.g. "trendRegime", "headTrader"). Used everywhere.
+  name          String    @unique
+  displayName   String
+  kind          AgentKind
+  role          String
+  description   String
+  /// JSON metadata: inputs[], flags[], extras[]. Mirrors shared/registry.ts shape.
+  metadata      Json
+  /// FK helper to the current default prompt version. Backend sets this on insert.
+  activePromptVersionId String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  promptVersions PromptVersion[]
+  runs           AgentRun[]
+
+  @@index([kind])
+}
+
+// ============================================================================
+// BasePromptVersion — shared discipline/framework instructions prepended (as a
+// system prompt) to EVERY agent's role-specific prompt. Versioned independently
+// so you can change "how the agents should think" without touching individual
+// agent prompts. Only one row is `isActive: true` at any time.
+// ============================================================================
+
+model BasePromptVersion {
+  id          String   @id @default(uuid())
+  version     String   @unique
+  template    String   @db.Text
+  changelog   String?
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  runs AgentRun[]
+
+  @@index([isActive])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// Prompt versioning — every prompt template is stored, never overwritten.
+// ============================================================================
+
+model PromptVersion {
+  id          String   @id @default(uuid())
+  agentId     String
+  /// Semver-ish: "0.1.0", "0.2.0-rc1", etc.
+  version     String
+  /// User-editable role/persona/discipline instructions. The runner concatenates
+  /// this with `outputContract` at render time. Splitting these two halves makes
+  /// it structurally impossible to silently break the runner by renaming an
+  /// output field in a prompt edit.
+  directiveTemplate String @db.Text
+  /// Auto-included canonical "REQUIRED OUTPUT — JSON only: { ... }" block.
+  /// Always derived from the agent's Zod schema in `backend/src/schemas/agent-outputs.ts`.
+  /// Persisted per-version so historical runs can be replayed against the exact
+  /// contract they were sent.
+  outputContract    String @db.Text
+  /// Human-readable note: what changed and why.
+  changelog   String?
+  /// Optional sampling config snapshot baked into this version.
+  modelName   String?
+  temperature Float?
+  isActive    Boolean  @default(false)
+  /// Shadow A/B: when true, the cycle runner ALSO renders this version each
+  /// cycle (alongside the active one) and persists its AgentRun with
+  /// runKind='ab'. Only one candidate per agent at a time — enforced in app
+  /// code, not the DB. Shadow TradePlans are persisted but never executed;
+  /// the counterfactual settler walks them forward for hit-rate comparison.
+  isShadowCandidate Boolean @default(false)
+  createdAt   DateTime @default(now())
+
+  agent Agent      @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  runs  AgentRun[]
+
+  @@unique([agentId, version])
+  @@index([agentId, createdAt])
+  @@index([isShadowCandidate])
+}
+
+// ============================================================================
+// Cycle — one row per (date, symbol). Aggregates all the agent activity for that
+// symbol on that day.
+// ============================================================================
+
+enum CycleStatus {
+  pending
+  running
+  completed
+  failed
+}
+
+model Cycle {
+  id           String      @id @default(uuid())
+  date         String       // YYYY-MM-DD
+  symbol       String
+  /// Snapshotted technicals at cycle time: close, rsi, sma20, sma50, macdHistogram, volume, avgVolume.
+  technicals   Json
+  /// Snapshotted regime/setup metadata once trendRegime + setupPattern run.
+  marketContext Json?
+  status       CycleStatus  @default(pending)
+  startedAt    DateTime     @default(now())
+  completedAt  DateTime?
+  /// Total wall time for the cycle in ms.
+  totalLatencyMs Int?
+  /// Total cost in USD across all agent runs in this cycle.
+  totalCostUsd Float?
+
+  runs                AgentRun[]
+  specialistAnalyses  SpecialistAnalysis[]
+  tradePlan           TradePlan?
+  deliberation        Deliberation?
+  critiques           Critique[]
+  anomalies           Anomaly[]
+
+  @@unique([date, symbol])
+  @@index([date])
+  @@index([symbol, date])
+  @@index([status])
+}
+
+// ============================================================================
+// AgentRun — the audit primitive. ONE ROW PER LLM INVOCATION.
+// Every domain row (SpecialistAnalysis, TradePlan proposal, ToolCall result)
+// references an AgentRun so the chain of custody is unbroken.
+// ============================================================================
+
+model AgentRun {
+  id                  String   @id @default(uuid())
+  agentId             String
+  promptVersionId     String
+  /// Active base-prompt version at the time of this run. Nullable for backwards
+  /// compat with runs created before the base prompt was introduced.
+  basePromptVersionId String?
+  cycleId             String?
+  /// SHA-256 of the rendered prompt — used for replay & stability checks.
+  inputHash       String
+  /// The fully rendered prompt as sent to the LLM.
+  renderedPrompt  String   @db.Text
+  /// Structured input snapshot (technicals, sandbox state, specialist outputs...).
+  inputPayload    Json
+  /// Provider + model that served this call.
+  provider        String    // "openai" | "anthropic" | "mock"
+  modelName       String
+  temperature     Float
+  /// Raw response text from the LLM.
+  rawResponse     String   @db.Text
+  /// Zod-parsed output if validation succeeded.
+  parsedOutput    Json?
+  schemaValid     Boolean  @default(false)
+  /// Parse / validation error message if !schemaValid.
+  parseError      String?
+  /// Observability.
+  latencyMs       Int
+  tokensIn        Int?
+  tokensOut       Int?
+  costUsd         Float?
+  /// "primary" for the main run, "replay" for stability replays, "ab" for prompt A/B.
+  runKind         String   @default("primary")
+  createdAt       DateTime @default(now())
+
+  agent             Agent              @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  promptVersion     PromptVersion      @relation(fields: [promptVersionId], references: [id], onDelete: Cascade)
+  basePromptVersion BasePromptVersion? @relation(fields: [basePromptVersionId], references: [id], onDelete: SetNull)
+  cycle             Cycle?             @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  specialistAnalysis SpecialistAnalysis?
+  tradePlan          TradePlan?
+  toolCalls          ToolCall[]
+  critique           Critique?
+  feedConsumptions   FeedConsumption[]
+
+  @@index([agentId, createdAt])
+  @@index([cycleId])
+  @@index([promptVersionId])
+  @@index([basePromptVersionId])
+  @@index([inputHash])
+  @@index([schemaValid])
+  @@index([runKind])
+}
+
+// ============================================================================
+// FeedFetch — one row per external-data pull (news, earnings, FRED series,
+// economic calendar, etc.). Every fetch is auditable: source, URL, payload,
+// latency, cost. Joined to AgentRun via FeedConsumption so we can answer
+// "what decisions were made because of this article / data point?"
+// ============================================================================
+
+model FeedFetch {
+  id           String   @id @default(uuid())
+  /// 'alpaca_news' | 'finnhub_company_news' | 'finnhub_earnings' |
+  /// 'finnhub_economic_calendar' | 'fred_dgs10' | 'fred_vixcls' | etc.
+  source       String
+  /// Symbol the fetch was for. Null for macro / market-wide feeds.
+  symbol       String?
+  /// Canonical request URL (or, for news, the canonical article URL).
+  url          String?
+  fetchedAt    DateTime @default(now())
+  /// Full normalized response. For news, an array of articles; for FRED,
+  /// the parsed observation; for calendars, the upcoming events list.
+  payload      Json
+  latencyMs    Int
+  costUsd      Float?
+  errored      Boolean  @default(false)
+  errorMessage String?
+
+  consumptions FeedConsumption[]
+
+  @@index([source, fetchedAt])
+  @@index([symbol, fetchedAt])
+  @@index([errored])
+}
+
+// ============================================================================
+// FeedConsumption — join row recording that a specific AgentRun saw a
+// specific FeedFetch. `influenceTag` is the agent's self-reported impact
+// (e.g., "forced_hold" when newsEvents flipped to HOLD because earnings
+// were 2 days out, "no_impact" when the data was seen but didn't change
+// the call). Used by the audit UI to surface "decisions driven by feed X."
+// ============================================================================
+
+model FeedConsumption {
+  id           String   @id @default(uuid())
+  feedFetchId  String
+  agentRunId   String
+  cycleId      String?
+  influenceTag String?
+  createdAt    DateTime @default(now())
+
+  feedFetch FeedFetch @relation(fields: [feedFetchId], references: [id], onDelete: Cascade)
+  agentRun  AgentRun  @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  @@index([agentRunId])
+  @@index([feedFetchId])
+  @@index([cycleId])
+}
+
+// ============================================================================
+// SpecialistAnalysis — domain output of one specialist run within a cycle.
+// ============================================================================
+
+model SpecialistAnalysis {
+  id            String   @id @default(uuid())
+  cycleId       String
+  agentRunId    String   @unique
+  /// Mirrors agent.name for fast filtering without a join.
+  agentName     String
+  bullishScore  Float    // -1..+1
+  confidence    Float    // 0..1
+  rationale     String[]
+  flags         String[]
+  /// { support: number | null, resistance: number | null }
+  keyLevels     Json?
+  /// Specialist-specific structured fields (regime, setupName, momentumState, ...).
+  extras        Json?
+  createdAt     DateTime @default(now())
+
+  cycle    Cycle    @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  @@index([cycleId])
+  @@index([agentName, createdAt])
+}
+
+// ============================================================================
+// Deliberation — head trader's reasoning trace for a cycle. References many
+// AgentRuns (one per tool-using round).
+// ============================================================================
+
+enum TradeAction {
+  BUY
+  SELL
+  HOLD
+  CLOSE
+}
+
+model Deliberation {
+  id              String   @id @default(uuid())
+  cycleId         String   @unique
+  rounds          Int
+  finalAction     TradeAction
+  conviction      Float    // 0..1
+  totalLatencyMs  Int
+  totalTokens     Int?
+  totalCostUsd    Float?
+  modelName       String
+  /// Array of { round, thought, toolUsed, agentRunId } — the audit trail.
+  reasoningTrace  Json
+  createdAt       DateTime @default(now())
+
+  cycle Cycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================================
+// ToolCall — tool invocations made by tool-using agents (head trader, etc).
+// ============================================================================
+
+model ToolCall {
+  id           String   @id @default(uuid())
+  agentRunId   String
+  round        Int
+  toolName     String
+  args         Json
+  result       Json
+  latencyMs    Int
+  errored      Boolean  @default(false)
+  errorMessage String?
+  /// Optional: did this tool result *change* the action vs the no-tool baseline?
+  influenceTag String?   // "changed_action" | "tightened_stop" | "no_op" | null
+  createdAt    DateTime @default(now())
+
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  @@index([agentRunId, round])
+  @@index([toolName])
+}
+
+// ============================================================================
+// TradePlan — head trader's emitted plan for a cycle.
+// ============================================================================
+
+enum TradePlanStatus {
+  proposed
+  active
+  closed
+  cancelled
+  invalidated
+}
+
+enum CloseReason {
+  stop_hit
+  target_hit
+  target1_hit
+  target2_hit
+  time_stop
+  regime_change
+  manual
+  invalidated
+}
+
+model TradePlan {
+  id                   String           @id @default(uuid())
+  cycleId              String           @unique
+  agentRunId           String           @unique
+  symbol               String
+  action               TradeAction
+  setupName            String?
+  entry                Float
+  stop                 Float?
+  target1              Float?
+  target2              Float?
+  riskPctOfEquity      Float
+  riskDollars          Float
+  shares               Float
+  conviction           Float
+  timeStopBars         Int?
+  invalidationCriteria String[]
+  status               TradePlanStatus  @default(proposed)
+  closeReason          CloseReason?
+  closedAt             DateTime?
+  realizedPnl          Float?
+  /// Number of bars actually held (only set on close).
+  heldBars             Int?
+  createdAt            DateTime         @default(now())
+
+  /// Real Alpaca order id — set only when RUNNER_DRY_RUN=false and the
+  /// runner actually submitted this plan. Null for every dry-run / HOLD
+  /// plan, which today is all of them. Unrelated to `status` /
+  /// `closeReason` / `realizedPnl`, which stay driven by the counterfactual
+  /// settler (settlePlans.ts) regardless of whether a real order exists —
+  /// the two are intentionally decoupled (see AlpacaAccount doc comment).
+  brokerOrderId        String?          @unique
+  brokerOrderStatus    String?
+  brokerFilledQty      Float?
+  brokerFilledAvgPrice Float?
+  brokerSubmittedAt    DateTime?
+
+  cycle    Cycle     @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  agentRun AgentRun  @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  outcome  TradeOutcome?
+  critiques Critique[]
+
+  @@index([symbol, status])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// TradeOutcome — settled result. Decoupled from TradePlan so we can compute
+// outcome metrics (R-multiple, MFE/MAE) without bloating the plan row.
+// ============================================================================
+
+model TradeOutcome {
+  id            String      @id @default(uuid())
+  tradePlanId   String      @unique
+  closeReason   CloseReason
+  realizedPnl   Float
+  /// R-multiple: (exit - entry) / (entry - stop) for longs.
+  rMultiple     Float?
+  /// Max favorable excursion in $ from entry over the holding period.
+  mfe           Float?
+  /// Max adverse excursion (worst drawdown intra-trade) in $.
+  mae           Float?
+  heldBars      Int
+  closedAt      DateTime    @default(now())
+
+  tradePlan TradePlan @relation(fields: [tradePlanId], references: [id], onDelete: Cascade)
+
+  @@index([closedAt])
+  @@index([closeReason])
+}
+
+// ============================================================================
+// Critique — written by the `critic` agent post-cycle (or by a human reviewer).
+// Anchored to the cycle, optionally to a trade plan or a specific agent run.
+// ============================================================================
+
+enum Severity {
+  info
+  warn
+  error
+}
+
+model Critique {
+  id          String   @id @default(uuid())
+  cycleId     String?
+  agentRunId  String?  @unique
+  tradePlanId String?
+  /// "critic" | "human" | name of the specific agent that wrote this.
+  author      String
+  severity    Severity @default(info)
+  body        String   @db.Text
+  /// Optional structured tags ("missed_overbought", "stop_too_tight", ...).
+  tags        String[]
+  createdAt   DateTime @default(now())
+
+  cycle     Cycle?     @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  agentRun  AgentRun?  @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  tradePlan TradePlan? @relation(fields: [tradePlanId], references: [id], onDelete: Cascade)
+
+  @@index([cycleId])
+  @@index([author, createdAt])
+  @@index([severity])
+}
+
+// ============================================================================
+// Anomaly — auto-detected oddities. UI highlights these prominently.
+// ============================================================================
+
+enum AnomalyKind {
+  schema_failure
+  latency_spike
+  cost_spike
+  output_drift
+  confidence_outlier
+  unanimous_disagreement
+  hit_rate_drop
+  stability_low
+}
+
+model Anomaly {
+  id          String      @id @default(uuid())
+  kind        AnomalyKind
+  severity    Severity    @default(warn)
+  agentId     String?
+  cycleId     String?
+  /// Free-form details — JSON for query, body for human read.
+  detail      Json
+  body        String      @db.Text
+  /// Set when an operator acks the anomaly.
+  acknowledgedAt DateTime?
+  acknowledgedBy String?
+  createdAt   DateTime    @default(now())
+
+  cycle Cycle? @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+
+  @@index([kind, createdAt])
+  @@index([severity])
+  @@index([acknowledgedAt])
+}
+
+// ============================================================================
+// Wallet — persistent shared capital ledger.
+//
+// Replaces the snapshot-y `StrategyConfig.allocatedCapital` for sizing
+// purposes. Balance is computed as SUM(amount) over WalletTransaction rows;
+// no denormalized balance column = no drift. Deposits/withdrawals are
+// explicit operator actions with `author` + `reason` (audit trail).
+// trade_settlement rows are auto-booked by the settler when a TradeOutcome
+// closes, so realized P&L flows into the wallet without manual reconciliation.
+// ============================================================================
+
+model Wallet {
+  id           String              @id @default(uuid())
+  /// Stable display name. The default seed is "primary"; future multi-wallet
+  /// flows can add more rows with distinct names without schema changes.
+  name         String              @unique
+  /// Operator-friendly description shown in the UI.
+  description  String?
+  createdAt    DateTime            @default(now())
+
+  transactions WalletTransaction[]
+}
+
+enum WalletTxKind {
+  deposit
+  withdrawal
+  trade_settlement
+  adjustment
+}
+
+model WalletTransaction {
+  id          String       @id @default(uuid())
+  walletId    String
+  kind        WalletTxKind
+  /// Signed dollars: +ve for deposits and winning settlements, -ve for
+  /// withdrawals and losing settlements. Balance = SUM(amount).
+  amount      Float
+  /// Required for operator actions; auto-filled by the settler.
+  reason      String
+  /// Operator identity for deposit/withdrawal/adjustment. "settler" for
+  /// auto-booked trade settlements.
+  author      String
+  /// Set when kind=trade_settlement, points to the closing TradePlan so the
+  /// UI can navigate from ledger entry to plan + outcome.
+  tradePlanId String?
+  createdAt   DateTime     @default(now())
+
+  wallet      Wallet       @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  /// Idempotency: re-running the settler must not double-book a settlement.
+  /// One settlement per closing TradePlan.
+  @@unique([tradePlanId])
+  @@index([walletId, createdAt])
+  @@index([kind])
+}
+
+// ============================================================================
+// RiskConfig — tunable risk knobs (sizing, drawdown ladder, default stops).
+// ============================================================================
+
+model RiskConfig {
+  id                     String   @id @default(uuid())
+  /// Name of the preset this row was created from, or "custom".
+  presetName             String   @default("balanced")
+  riskTolerancePct       Float    @default(1.0)
+  maxRiskPctPerTrade     Float    @default(0.02)
+  maxConcurrentPositions Int      @default(3)
+  drawdownHalveAt        Float    @default(0.10)
+  drawdownCloseOnlyAt    Float    @default(0.15)
+  drawdownHardHaltAt     Float    @default(0.20)
+  defaultStopLossPct     Float    @default(0.05)
+  defaultTarget1R        Float    @default(1.6)
+  defaultTarget2R        Float    @default(3.2)
+  defaultTimeStopBars    Int      @default(10)
+  reason                 String?
+  author                 String?
+  createdAt              DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ============================================================================
+// StrategyConfig — append-only ledger of strategy preferences. Independent of
+// RiskConfig so you can change strategy bias without touching risk knobs.
+// ============================================================================
+
+enum StrategyBias {
+  trend_following
+  mean_reversion
+  balanced
+}
+
+enum HoldingPeriod {
+  short_term  // 1-3 days
+  medium_term // 3-10 days
+  long_term   // 10-30 days
+}
+
+model StrategyConfig {
+  id                String        @id @default(uuid())
+  presetName        String        @default("balanced")
+  /// How the head trader should weight specialists.
+  strategyBias      StrategyBias  @default(balanced)
+  /// Preferred holding period — affects timeStopBars default.
+  holdingPeriod     HoldingPeriod @default(medium_term)
+  /// If true, head trader is instructed to HOLD when an earnings event is
+  /// within `avoidEarningsWindowDays` days.
+  avoidEarnings     Boolean       @default(true)
+  avoidEarningsWindowDays Int     @default(3)
+  /// Symbols watchlist — what the cycle runner iterates over.
+  watchlist         String[]      @default(["SPY", "AAPL", "NVDA", "TSLA", "MSFT", "AMZN"])
+  /// Allocated capital for the sandbox in USD.
+  allocatedCapital  Float         @default(2000)
+  reason            String?
+  author            String?
+  createdAt         DateTime      @default(now())
+
+  @@index([createdAt])
+}
+
+// ============================================================================
+// WatchlistProposal — outputs of the growthScout agent. Operator-gated:
+// proposals enter as `proposed`, become `approved` (which writes a new
+// StrategyConfig row appending the symbol) or `rejected` (with reason).
+// Append-only: rejected/superseded proposals stay in the table for audit so
+// you can see "the scout suggested AMD three weeks ago, I rejected it, here's
+// why" instead of having it silently re-propose every week.
+// ============================================================================
+
+enum WatchlistProposalStatus {
+  proposed
+  approved
+  rejected
+  /// Set when a later discovery run reproposes the same symbol; the older
+  /// row gets superseded and the newer row supersedes it. Keeps the table
+  /// honest about which version of the thesis you're acting on.
+  superseded
+}
+
+model WatchlistProposal {
+  id              String                  @id @default(uuid())
+  symbol          String
+  status          WatchlistProposalStatus  @default(proposed)
+  /// 'growthScout' for agent-discovered, 'manual' for operator-added (rare).
+  proposedBy      String
+  /// Set when the scout agent produced this proposal — links to its AgentRun
+  /// for full audit (rendered prompt, raw response, parsed output, cost).
+  agentRunId      String?
+  /// Cached LLM viability score 0..1.
+  viabilityScore  Float?
+  /// Compact growth thesis from the agent for at-a-glance review.
+  thesis          String?
+  /// Structured concerns the agent surfaced.
+  concerns        String[]               @default([])
+  /// Cached LLM rationale (multi-line) for the audit detail view.
+  rationale       String[]               @default([])
+  /// Quant snapshot at proposal time: ADV, last close, 1d / 5d / 30d return,
+  /// market cap, P/E if available. Lets the audit page show what the screener
+  /// + scout saw without re-fetching.
+  quantSnapshot   Json?
+  proposedAt      DateTime               @default(now())
+  /// Set when status moves to 'approved' or 'rejected'.
+  decidedAt       DateTime?
+  decidedBy       String?
+  rejectedReason  String?
+  /// When status='superseded', points at the newer proposal that replaced this one.
+  supersededById  String?
+
+  @@index([status, proposedAt])
+  @@index([symbol, status])
+  @@index([agentRunId])
+}
